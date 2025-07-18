@@ -110,14 +110,21 @@ jobs:
 
       - name: Build macOS app
         id: build
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.CERT_ID }}
         run: |
           echo "🔨 Building macOS app..."
           pnpm tauri build --target ${{ matrix.target }}
           
           # Find generated artifacts
           echo "📦 Locating artifacts..."
-          DMG_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" 2>/dev/null || echo "")
-          APP_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" 2>/dev/null || echo "")
+          
+          # Check different possible paths for artifacts
+          DMG_FILES=$(find src-tauri/target -name "*.dmg" 2>/dev/null || echo "")
+          APP_FILES=$(find src-tauri/target -name "*.app" -type d 2>/dev/null || echo "")
+          
+          echo "Found DMG files: $DMG_FILES"
+          echo "Found APP files: $APP_FILES"
           
           # Create app.tar.gz from .app bundle
           if [ -n "$APP_FILES" ]; then
@@ -137,7 +144,7 @@ jobs:
             ARTIFACTS="$ARTIFACTS $DMG_FILES"
           fi
           
-          TAR_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.tar.gz" 2>/dev/null || echo "")
+          TAR_FILES=$(find src-tauri/target -name "*.tar.gz" 2>/dev/null || echo "")
           if [ -n "$TAR_FILES" ]; then
             ARTIFACTS="$ARTIFACTS $TAR_FILES"
           fi
@@ -179,8 +186,8 @@ jobs:
         with:
           name: macos-${{ matrix.arch }}-artifacts
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/*.dmg
+            src-tauri/target/**/*.app.tar.gz
           retention-days: 30
           if-no-files-found: warn
 

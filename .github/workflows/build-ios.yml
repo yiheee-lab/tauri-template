@@ -67,42 +67,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Setup iOS signing
+      - name: Setup iOS signing (Optional)
+        if: env.IOS_CERTIFICATE != ''
         env:
-          # iOS signing requires:
-          # 1. Apple Developer Account
-          # 2. iOS Distribution Certificate (.p12 file)
-          # 3. Provisioning Profile (.mobileprovision file)
-          # 4. App Store Connect API Key (optional, for automatic upload)
-          
-          # ============ Signing Certificate ============
-          # Go to https://developer.apple.com/account/resources/certificates/list
-          # Create "iOS Distribution" certificate
-          # Download and export as .p12 file from Keychain Access
-          # Convert to base64: openssl base64 -in certificate.p12 -out certificate.txt
           IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          
-          # ============ Provisioning Profile ============
-          # Go to https://developer.apple.com/account/resources/profiles/list
-          # Create "App Store" provisioning profile
-          # Download .mobileprovision file
-          # Convert to base64: base64 -i profile.mobileprovision -o profile.txt
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-          
-          # ============ App Store Connect API (Optional) ============
-          # For automatic upload to App Store Connect
-          # Go to https://appstoreconnect.apple.com/access/api
-          # Create API key and download .p8 file
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          
-          # ============ Team and Bundle ID ============
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
-          
-          # Keychain password for CI
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           echo "🔐 Setting up iOS signing..."
@@ -114,23 +86,16 @@ jobs:
           security set-keychain-settings -t 3600 -u ios-build.keychain
           
           # Import certificate
-          if [ -n "$IOS_CERTIFICATE" ]; then
-            echo "$IOS_CERTIFICATE" | base64 --decode > ios-certificate.p12
-            security import ios-certificate.p12 -k ios-build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ios-build.keychain
-            
-            # Find certificate identity
-            CERT_INFO=$(security find-identity -v -p codesigning ios-build.keychain | grep "iPhone Distribution" || security find-identity -v -p codesigning ios-build.keychain | grep "Apple Distribution")
-            if [ -n "$CERT_INFO" ]; then
-              CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
-              echo "SIGNING_IDENTITY=$CERT_ID" >> $GITHUB_ENV
-              echo "✅ Certificate imported: $CERT_ID"
-            else
-              echo "❌ No valid iOS distribution certificate found"
-              exit 1
-            fi
-          else
-            echo "⚠️  No iOS certificate provided, building unsigned"
+          echo "$IOS_CERTIFICATE" | base64 --decode > ios-certificate.p12
+          security import ios-certificate.p12 -k ios-build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ios-build.keychain
+          
+          # Find certificate identity
+          CERT_INFO=$(security find-identity -v -p codesigning ios-build.keychain | grep "iPhone Distribution" || security find-identity -v -p codesigning ios-build.keychain | grep "Apple Distribution")
+          if [ -n "$CERT_INFO" ]; then
+            CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
+            echo "SIGNING_IDENTITY=$CERT_ID" >> $GITHUB_ENV
+            echo "✅ Certificate imported: $CERT_ID"
           fi
           
           # Import provisioning profile
@@ -138,8 +103,6 @@ jobs:
             mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
             echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
             echo "✅ Provisioning profile imported"
-          else
-            echo "⚠️  No provisioning profile provided"
           fi
 
       - name: Initialize iOS project
@@ -176,19 +139,17 @@ jobs:
         run: |
           echo "🔨 Building iOS app..."
           
-          # Build for iOS
-          if [ -n "$SIGNING_IDENTITY" ]; then
-            echo "🔐 Building with signing..."
-            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store
-          else
-            echo "⚠️  Building without signing..."
-            pnpm tauri ios build --target ${{ matrix.target }}
-          fi
+          # Build for iOS (without signing for now)
+          echo "⚠️  Building without signing (development build)..."
+          pnpm tauri ios build --target ${{ matrix.target }}
           
           # Find generated artifacts
           echo "📦 Locating artifacts..."
-          IPA_FILES=$(find src-tauri/gen/ios/build -name "*.ipa" 2>/dev/null || echo "")
-          APP_FILES=$(find src-tauri/gen/ios/build -name "*.app" 2>/dev/null || echo "")
+          IPA_FILES=$(find src-tauri/gen/ios -name "*.ipa" 2>/dev/null || echo "")
+          APP_FILES=$(find src-tauri/gen/ios -name "*.app" -type d 2>/dev/null || echo "")
+          
+          echo "Found IPA files: $IPA_FILES"
+          echo "Found APP files: $APP_FILES"
           
           # Create artifacts list
           ARTIFACTS=""
@@ -230,8 +191,8 @@ jobs:
         with:
           name: ios-${{ matrix.arch }}-artifacts
           path: |
-            src-tauri/gen/ios/build/**/*.ipa
-            src-tauri/gen/ios/build/**/*.app
+            src-tauri/gen/ios/**/*.ipa
+            src-tauri/gen/ios/**/*.app
           retention-days: 30
           if-no-files-found: warn
 

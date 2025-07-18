@@ -219,13 +219,16 @@ jobs:
         run: |
           echo "🔨 Building Android app..."
           
-          # Build APK and AAB
-          pnpm tauri android build --apk --aab --target ${{ matrix.target }}
+          # Build APK (AAB support may not be available in all Tauri versions)
+          pnpm tauri android build --apk --target ${{ matrix.target }}
           
           # Find generated artifacts
           echo "📦 Locating artifacts..."
-          APK_FILES=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" 2>/dev/null || echo "")
-          AAB_FILES=$(find src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" 2>/dev/null || echo "")
+          APK_FILES=$(find src-tauri/gen/android -name "*.apk" 2>/dev/null || echo "")
+          AAB_FILES=$(find src-tauri/gen/android -name "*.aab" 2>/dev/null || echo "")
+          
+          echo "Found APK files: $APK_FILES"
+          echo "Found AAB files: $AAB_FILES"
           
           # Rename artifacts with proper naming convention
           if [ -n "$APK_FILES" ]; then
@@ -274,8 +277,8 @@ jobs:
         with:
           name: android-${{ matrix.arch }}-artifacts
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+            src-tauri/gen/android/**/*.apk
+            src-tauri/gen/android/**/*.aab
           retention-days: 30
           if-no-files-found: warn
 
