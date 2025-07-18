@@ -20,6 +20,9 @@ jobs:
             args: '--target x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: ''
+          - platform: 'ubuntu-22.04'
+            args: '--target aarch64-linux-android'
+            android: true
           - platform: 'windows-latest'
             args: ''
 
@@ -32,7 +35,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify macOS certificate
+      - name: Setup Android SDK (Android only)
+        if: matrix.android
+        uses: android-actions/setup-android@v2
+        with:
+          api-level: 31
+          target: 'default'
+          arch: 'arm64-v8a'
+          ndk: '23.1.7779620'
+
+      - name: Verify macOS certificate (macOS only)
+        if: matrix.platform == 'macos-latest' && env.sign-macos
         env:
           # https://tauri.app/distribute/sign/macos/
           # ============ Signing ============
@@ -57,7 +70,6 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # https://developer.apple.com/account -> drag down (or just search "Team ID")
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        if: matrix.platform == 'macos-latest' && env.sign-macos
         run: |
           echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -71,10 +83,9 @@ jobs:
           CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
           echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
           echo "Certificate imported."
-          
 
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-22.04' && !matrix.android
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
