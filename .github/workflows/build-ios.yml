@@ -63,7 +63,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          key: ${{ runner.os }}-${{ matrix.rust_target }}-rust
+          key: ios-rust-${{ runner.os }}-${{ matrix.rust_target }}-v1
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -183,7 +183,7 @@ jobs:
           # Build for iOS
           if [ -n "$SIGNING_IDENTITY" ]; then
             echo "🔐 Building with signing..."
-            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store
+            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store-connect
           else
             echo "⚠️  Building without signing..."
             pnpm tauri ios build --target ${{ matrix.target }}

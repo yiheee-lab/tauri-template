@@ -66,7 +66,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          key: ${{ runner.os }}-${{ matrix.target }}-rust
+          key: linux-rust-${{ runner.os }}-${{ matrix.target }}-v1
 
       - name: Install frontend dependencies
         run: pnpm install

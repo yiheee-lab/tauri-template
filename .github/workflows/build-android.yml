@@ -130,7 +130,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
-          key: ${{ runner.os }}-${{ matrix.rust_target }}-rust
+          key: android-rust-${{ runner.os }}-${{ matrix.rust_target }}-v1
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -141,9 +141,9 @@ jobs:
             src-tauri/gen/android/.gradle
             src-tauri/gen/android/app/.gradle
             src-tauri/gen/android/app/build
-          key: ${{ runner.os }}-gradle-${{ hashFiles('src-tauri/gen/android/**/*.gradle*') }}
+          key: android-gradle-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('src-tauri/gen/android/**/*.gradle*') }}
           restore-keys: |
-            ${{ runner.os }}-gradle-
+            android-gradle-${{ runner.os }}-${{ runner.arch }}-v1-
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -261,9 +261,14 @@ jobs:
             for apk in $APK_FILES; do
               if [ -f "$apk" ]; then
                 dir=$(dirname "$apk")
+                current_name=$(basename "$apk")
                 new_name="${{ inputs.name }}-${{ inputs.version }}-android-${{ matrix.arch }}.apk"
-                mv "$apk" "$dir/$new_name"
-                echo "✅ Renamed APK: $new_name"
+                if [ "$current_name" != "$new_name" ]; then
+                  mv "$apk" "$dir/$new_name"
+                  echo "✅ Renamed APK: $current_name → $new_name"
+                else
+                  echo "✅ APK already has correct name: $new_name"
+                fi
               fi
             done
           fi
@@ -272,9 +277,14 @@ jobs:
             for aab in $AAB_FILES; do
               if [ -f "$aab" ]; then
                 dir=$(dirname "$aab")
+                current_name=$(basename "$aab")
                 new_name="${{ inputs.name }}-${{ inputs.version }}-android-${{ matrix.arch }}.aab"
-                mv "$aab" "$dir/$new_name"
-                echo "✅ Renamed AAB: $new_name"
+                if [ "$current_name" != "$new_name" ]; then
+                  mv "$aab" "$dir/$new_name"
+                  echo "✅ Renamed AAB: $current_name → $new_name"
+                else
+                  echo "✅ AAB already has correct name: $new_name"
+                fi
               fi
             done
           fi
