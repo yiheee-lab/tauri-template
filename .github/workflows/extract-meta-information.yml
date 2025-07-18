@@ -1,4 +1,4 @@
-name: extract-version
+name: Extract Meta Information
 
 on:
   workflow_call:
@@ -7,14 +7,18 @@ on:
         required: true
         type: string
     outputs:
+      name:
+        description: 'The extracted name from package.json'
+        value: ${{ jobs.extract-meta-information.outputs.name }}
       version:
         description: 'The extracted version from package.json'
-        value: ${{ jobs.extract-version.outputs.version }}
+        value: ${{ jobs.extract-meta-information.outputs.version }}
 
 jobs:
-  extract-version:
+  extract-meta-information:
     runs-on: ubuntu-latest
     outputs:
+      name: ${{ steps.package-version.outputs.name }}
       version: ${{ steps.package-version.outputs.version }}
     steps:
       - name: Checkout repository
@@ -31,4 +35,6 @@ jobs:
         run: |
           cd ${{ inputs.path }}
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT

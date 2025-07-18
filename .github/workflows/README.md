@@ -15,7 +15,7 @@ This directory contains the GitHub Actions workflows for the Tauri Template proj
   - Provides comprehensive build summary
   - Inherits secrets for signing and publishing
 
-#### `extract-version.yml` - Version Extraction
+#### `extract-meta-information.yml` - Version Extraction
 - **Purpose**: Reusable workflow to extract version from package.json
 - **Type**: Reusable workflow (workflow_call)
 - **Outputs**: `version` - The extracted version string
@@ -67,7 +67,7 @@ These workflows are called by `build.yml` and should not be triggered directly:
 
 ```mermaid
 graph TD
-    A[build.yml] --> B[extract-version.yml]
+    A[build.yml] --> B[extract-meta-information.yml]
     A --> C[build-sign-android.yml]
     A --> D[build-sign-ios.yml]
     A --> E[build-sign-macos.yml]
@@ -141,7 +141,7 @@ gh workflow run maintenance.yml
 
 1. **Always use the core orchestrator**: Use `build.yml` for building, not individual platform workflows
 2. **Test before release**: The release workflow automatically runs tests
-3. **Use reusable workflows**: `extract-version.yml` is used by multiple workflows
+3. **Use reusable workflows**: `extract-meta-information.yml` is used by multiple workflows
 4. **Monitor summaries**: Each workflow provides detailed summaries in the GitHub Actions UI
 5. **Keep secrets secure**: Never hardcode secrets in workflow files
 

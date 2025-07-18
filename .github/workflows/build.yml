@@ -9,61 +9,56 @@ on:
     branches:
       - main
 
-env:
-  APP_NAME: "tauri-template"
-  APP_PATH: "./"
-
 jobs:
-  # Extract version from package.json using reusable workflow
-  extract-version:
-    uses: ./.github/workflows/extract-version.yml
+  extract-meta-information:
+    uses: ./.github/workflows/extract-meta-information.yml
     with:
-      path: ${{ env.APP_PATH }}
+      path: "./"
 
   # Build for all platforms in parallel
   build-android:
-    needs: extract-version
+    needs: extract-meta-information
     uses: ./.github/workflows/build-sign-android.yml
     with:
-      name: ${{ env.APP_NAME }}
-      version: ${{ needs.extract-version.outputs.version }}
-      path: ${{ env.APP_PATH }}
+      name: "tauri-template"
+      version: ${{ needs.extract-meta-information.outputs.version }}
+      path: "./"
     secrets: inherit
 
   build-ios:
-    needs: extract-version
+    needs: extract-meta-information
     uses: ./.github/workflows/build-sign-ios.yml
     with:
-      name: ${{ env.APP_NAME }}
-      version: ${{ needs.extract-version.outputs.version }}
-      path: ${{ env.APP_PATH }}
+      name: "tauri-template"
+      version: ${{ needs.extract-meta-information.outputs.version }}
+      path: "./"
     secrets: inherit
 
   build-macos:
-    needs: extract-version
+    needs: extract-meta-information
     uses: ./.github/workflows/build-sign-macos.yml
     with:
-      name: ${{ env.APP_NAME }}
-      version: ${{ needs.extract-version.outputs.version }}
-      path: ${{ env.APP_PATH }}
+      name: "tauri-template"
+      version: ${{ needs.extract-meta-information.outputs.version }}
+      path: "./"
     secrets: inherit
 
   build-ubuntu:
-    needs: extract-version
+    needs: extract-meta-information
     uses: ./.github/workflows/build-ubuntu.yml
     with:
-      name: ${{ env.APP_NAME }}
-      version: ${{ needs.extract-version.outputs.version }}
-      path: ${{ env.APP_PATH }}
+      name: "tauri-template"
+      version: ${{ needs.extract-meta-information.outputs.version }}
+      path: "./"
     secrets: inherit
 
   build-windows:
-    needs: extract-version
+    needs: extract-meta-information
     uses: ./.github/workflows/build-windows.yml
     with:
-      name: ${{ env.APP_NAME }}
-      version: ${{ needs.extract-version.outputs.version }}
-      path: ${{ env.APP_PATH }}
+      name: "tauri-template"
+      version: ${{ needs.extract-meta-information.outputs.version }}
+      path: "./"
     secrets: inherit
 
   # Summary job that depends on all builds

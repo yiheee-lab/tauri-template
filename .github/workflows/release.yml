@@ -16,14 +16,11 @@ on:
     tags:
       - 'v*'
 
-env:
-  APP_NAME: "tauri-template"
-  APP_PATH: "./"
 
 jobs:
   # Extract version from package.json or use input
-  extract-version:
-    uses: ./.github/workflows/extract-version.yml
+  extract-meta-information:
+    uses: ./.github/workflows/extract-meta-information.yml
     with:
       path: ${{ env.APP_PATH }}
 
@@ -33,13 +30,13 @@ jobs:
 
   # Build all platforms for release
   build-all-platforms:
-    needs: [extract-version, run-tests]
+    needs: [extract-meta-information, run-tests]
     uses: ./.github/workflows/build.yml
     secrets: inherit
 
   # Create GitHub release
   create-release:
-    needs: [extract-version, build-all-platforms]
+    needs: [extract-meta-information, build-all-platforms]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -55,7 +52,7 @@ jobs:
           elif [ "${{ github.event_name }}" == "push" ]; then
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           else
-            echo "version=v${{ needs.extract-version.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=v${{ needs.extract-meta-information.outputs.version }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Create Release
