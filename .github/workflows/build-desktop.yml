@@ -51,6 +51,12 @@ jobs:
       - name: Setup Android SDK (Android only)
         if: matrix.android
         uses: android-actions/setup-android@v3
+      
+      - name: Setup Android NDK (Android only)
+        if: matrix.android
+        run: |
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" --sdk_root=${ANDROID_SDK_ROOT}
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
 
       - name: Setup macOS signing (macOS only)
         if: matrix.platform == 'macos-latest' && env.sign-macos
@@ -121,6 +127,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target || '' }}
+      
+      - name: Install Tauri CLI with Android support (Android Only)
+        if: matrix.android
+        run: cargo install tauri-cli --features android
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
