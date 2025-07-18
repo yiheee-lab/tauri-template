@@ -25,7 +25,6 @@ jobs:
             os_name: 'linux'
           - platform: 'ubuntu-22.04'
             target: 'aarch64-linux-android'
-            android: true
             os_name: 'android'
           - platform: 'windows-latest'
             target: ''
@@ -42,21 +41,42 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17 (Android only)
-        if: matrix.android
+        if: matrix.os_name == 'android'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK (Android only)
-        if: matrix.android
+        if: matrix.os_name == 'android'
         uses: android-actions/setup-android@v3
       
       - name: Setup Android NDK (Android only)
-        if: matrix.android
+        if: matrix.os_name == 'android'
         run: |
           ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" --sdk_root=${ANDROID_SDK_ROOT}
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Setup Android cross-compilation environment (Android only)
+        if: matrix.os_name == 'android'
+        run: |
+          # 设置 Android 交叉编译环境变量
+          echo "CC_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          
+          # 创建 cargo 配置目录
+          mkdir -p ~/.cargo
+          
+          # 创建 cargo 配置文件
+          cat > ~/.cargo/config.toml << EOF
+          [target.aarch64-linux-android]
+          ar = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          EOF
+
 
       - name: Setup macOS signing (macOS only)
         if: matrix.platform == 'macos-latest' && env.sign-macos
@@ -99,7 +119,7 @@ jobs:
           echo "Certificate imported."
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04' && !matrix.android
+        if: matrix.platform == 'ubuntu-22.04' && matrix.os_name != 'android'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -127,10 +147,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target || '' }}
-      
-      - name: Install Tauri CLI with Android support (Android Only)
-        if: matrix.android
-        run: cargo install tauri-cli --features android
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
