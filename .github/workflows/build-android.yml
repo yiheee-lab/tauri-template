@@ -50,19 +50,46 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Cache Android SDK
+      - name: Cache Android SDK Components
         uses: actions/cache@v4
         with:
-          path: ${{ env.ANDROID_SDK_ROOT }}
-          key: ${{ runner.os }}-android-sdk-${{ hashFiles('src-tauri/gen/android/build.gradle') }}
+          path: |
+            ~/.android/cache
+            ${{ env.ANDROID_SDK_ROOT }}/platform-tools
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools
+            ${{ env.ANDROID_SDK_ROOT }}/platforms
+            ${{ env.ANDROID_SDK_ROOT }}/cmdline-tools
+          key: ${{ runner.os }}-android-sdk-v2-${{ hashFiles('src-tauri/gen/android/build.gradle') }}
           restore-keys: |
-            ${{ runner.os }}-android-sdk-
+            ${{ runner.os }}-android-sdk-v2-
+
+      - name: Cache Android NDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_SDK_ROOT }}/ndk
+          key: ${{ runner.os }}-android-ndk-25.2.9519653
+          restore-keys: |
+            ${{ runner.os }}-android-ndk-
 
       - name: Setup Android NDK
         run: |
           ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" --sdk_root=${ANDROID_SDK_ROOT}
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
           echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Debug cache sizes
+        run: |
+          echo "📊 Cache directory sizes:"
+          if [ -d "$ANDROID_SDK_ROOT" ]; then
+            echo "Android SDK components:"
+            du -sh "$ANDROID_SDK_ROOT"/* 2>/dev/null | sort -hr | head -10 || echo "No SDK directories found"
+          fi
+          if [ -d ~/.gradle ]; then
+            echo "Gradle cache size: $(du -sh ~/.gradle 2>/dev/null | cut -f1)"
+          fi
+          if [ -d ~/.android ]; then
+            echo "Android user cache size: $(du -sh ~/.android 2>/dev/null | cut -f1)"
+          fi
 
       - name: Setup Android cross-compilation environment
         run: |
@@ -217,6 +244,7 @@ jobs:
 
       - name: Build Android app
         id: build
+        timeout-minutes: 45
         run: |
           echo "🔨 Building Android app..."
           
@@ -280,10 +308,33 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-      - name: Cleanup
+      - name: Cleanup build artifacts and cache optimization
         if: always()
         run: |
+          # Remove signing key
           rm -f release-key.jks || true
+          
+          # Clean up Android SDK cache-unfriendly directories to prevent timeout
+          if [ -d "$ANDROID_SDK_ROOT" ]; then
+            # Remove large temporary and cache directories that cause caching issues
+            rm -rf "$ANDROID_SDK_ROOT/temp" || true
+            rm -rf "$ANDROID_SDK_ROOT/tmp" || true
+            rm -rf "$ANDROID_SDK_ROOT/.temp" || true
+            rm -rf "$ANDROID_SDK_ROOT/system-images" || true
+            rm -rf "$ANDROID_SDK_ROOT/sources" || true
+            rm -rf "$ANDROID_SDK_ROOT/docs" || true
+            rm -rf "$ANDROID_SDK_ROOT/extras" || true
+            rm -rf "$ANDROID_SDK_ROOT/add-ons" || true
+            
+            # Clean up NDK build intermediates
+            find "$ANDROID_SDK_ROOT/ndk" -name "*.o" -delete 2>/dev/null || true
+            find "$ANDROID_SDK_ROOT/ndk" -name "*.a" -delete 2>/dev/null || true
+            find "$ANDROID_SDK_ROOT/ndk" -name "build" -type d -exec rm -rf {} + 2>/dev/null || true
+          fi
+          
+          # Clean up Gradle cache
+          rm -rf ~/.gradle/caches/build-cache-* || true
+          rm -rf ~/.gradle/caches/*/tmp || true
 
       - name: Build summary
         if: always()

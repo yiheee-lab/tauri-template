@@ -93,10 +93,13 @@ jobs:
           
           # ============ App Store Connect API (Optional) ============
           # For automatic upload to App Store Connect
-          # Go to https://appstoreconnect.apple.com/access/api
+          # Go to https://appstoreconnect.apple.com/access/integrations/api
           # Create API key and download .p8 file
+          # Convert to base64: openssl base64 -in key.p8 -out key.txt
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          # API Key ID
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          # Issuer ID
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           
           # ============ Team and Bundle ID ============
