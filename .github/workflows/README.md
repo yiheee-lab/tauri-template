@@ -1,171 +1,176 @@
 # GitHub Actions Workflows
 
-This directory contains the GitHub Actions workflows for the Tauri Template project. The workflows are organized with `build.yml` as the core orchestrator.
+This directory contains a unified CI/CD pipeline for building and releasing Tauri applications across all platforms.
 
-## Workflow Organization
+## 🏗️ Workflow Architecture
 
-### 🏗️ Core Workflows
+### Main Workflows
 
-#### `build.yml` - Main Build Orchestrator
-- **Purpose**: Central coordinator for all platform builds
-- **Triggers**: Push to main, Pull requests, Manual dispatch
-- **Features**:
-  - Extracts version using reusable workflow
-  - Builds all platforms in parallel
-  - Provides comprehensive build summary
-  - Inherits secrets for signing and publishing
+| Workflow | Purpose | Trigger | Description |
+|----------|---------|---------|-------------|
+| **main.yml** | CI/CD Pipeline | Push to main, PR, Manual | Builds all platforms in parallel |
+| **release.yml** | Release Creation | Tag push, Manual | Creates unified release with proper naming |
 
-#### `extract-meta-information.yml` - Version Extraction
-- **Purpose**: Reusable workflow to extract version from package.json
-- **Type**: Reusable workflow (workflow_call)
-- **Outputs**: `version` - The extracted version string
+### Platform-Specific Build Workflows
 
-### 🧪 Testing Workflows
+| Workflow | Platform | Artifacts | Signing |
+|----------|----------|-----------|---------|
+| **build-windows.yml** | Windows | `.msi`, `.exe` | ❌ Unsigned |
+| **build-macos.yml** | macOS | `.dmg`, `.app.tar.gz` | ✅ Code signing + Notarization |
+| **build-linux.yml** | Linux | `.deb`, `.rpm`, `.AppImage` | ❌ Unsigned |
+| **build-android.yml** | Android | `.apk`, `.aab` | ✅ Optional signing |
+| **build-ios.yml** | iOS | `.ipa` | ✅ Code signing + Provisioning |
 
-#### `test.yml` - Comprehensive Testing
-- **Purpose**: Run all tests (frontend, Rust, security)
-- **Triggers**: Push to main/develop, Pull requests, Manual dispatch
-- **Features**:
-  - Frontend tests and linting
-  - Rust tests, clippy, and formatting
-  - Security audits for both npm and Cargo
-  - Test result summary
+## 📁 Artifact Naming Convention
 
-### 🚀 Release Workflows
-
-#### `release.yml` - Release Management
-- **Purpose**: Create releases with all platform builds
-- **Triggers**: Tag push (v*), Manual dispatch
-- **Features**:
-  - Runs tests before building
-  - Uses build.yml for all platform builds
-  - Creates GitHub release with auto-generated notes
-  - Supports pre-releases
-
-### 🔧 Maintenance Workflows
-
-#### `maintenance.yml` - Automated Maintenance
-- **Purpose**: Regular maintenance tasks
-- **Triggers**: Weekly schedule (Sundays 2 AM UTC), Manual dispatch
-- **Features**:
-  - Dependency update checks
-  - Security vulnerability scans
-  - Code quality analysis
-  - Cleanup of old workflow runs
-
-### 📱 Platform-Specific Workflows
-
-These workflows are called by `build.yml` and should not be triggered directly:
-
-- `build-sign-android.yml` - Android APK builds
-- `build-sign-ios.yml` - iOS IPA builds  
-- `build-sign-macos.yml` - macOS DMG builds
-- `build-ubuntu.yml` - Ubuntu AppImage/DEB builds
-- `build-windows.yml` - Windows MSI/EXE builds
-
-## Workflow Dependencies
-
-```mermaid
-graph TD
-    A[build.yml] --> B[extract-meta-information.yml]
-    A --> C[build-sign-android.yml]
-    A --> D[build-sign-ios.yml]
-    A --> E[build-sign-macos.yml]
-    A --> F[build-ubuntu.yml]
-    A --> G[build-windows.yml]
-    
-    H[release.yml] --> I[test.yml]
-    H --> A
-    
-    J[maintenance.yml] --> K[Security Scans]
-    J --> L[Code Quality]
-    J --> M[Cleanup]
+All artifacts follow the unified naming convention:
+```
+{name}-{version}-{platform}-{architecture}.{extension}
 ```
 
-## Environment Variables
+### Examples:
+- `tauri-template-1.0.0-win-x64.msi`
+- `tauri-template-1.0.0-mac-arm64.dmg`
+- `tauri-template-1.0.0-linux-x64.deb`
+- `tauri-template-1.0.0-android-arm64.apk`
+- `tauri-template-1.0.0-ios-arm64.ipa`
 
-All workflows use consistent environment variables:
+## 🚀 Usage
 
-- `APP_NAME`: "tauri-template"
-- `APP_PATH`: "./"
+### Development Workflow (CI/CD Pipeline)
 
-## Secrets Required
+Triggered automatically on:
+- Push to `main` branch
+- Pull requests to `main` branch
+- Manual dispatch
 
-The following secrets should be configured in the repository:
+```bash
+# Workflow runs automatically, or trigger manually:
+gh workflow run "CI/CD Pipeline"
+```
 
-### For Android builds:
-- `ANDROID_KEYSTORE_BASE64`
+### Release Workflow
+
+Triggered by:
+- Creating a git tag: `git tag v1.0.0 && git push origin v1.0.0`
+- Manual dispatch with version input
+
+```bash
+# Create and push a tag
+git tag v1.0.0
+git push origin v1.0.0
+
+# Or trigger manually
+gh workflow run "Release" -f version=1.0.0
+```
+
+## 🔐 Required Secrets
+
+See [SECRETS.md](../SECRETS.md) for detailed setup instructions.
+
+### Quick Reference:
+
+#### iOS (Required for iOS builds):
+- `IOS_CERTIFICATE`
+- `IOS_CERTIFICATE_PASSWORD`
+- `IOS_PROVISIONING_PROFILE`
+- `APPLE_TEAM_ID`
+- `IOS_BUNDLE_ID`
+- `KEYCHAIN_PASSWORD`
+
+#### macOS (Required for macOS builds):
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `KEYCHAIN_PASSWORD`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+#### Android (Optional for signed builds):
+- `ANDROID_KEYSTORE`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-### For iOS builds:
-- `IOS_CERTIFICATE_BASE64`
-- `IOS_CERTIFICATE_PASSWORD`
-- `IOS_PROVISIONING_PROFILE_BASE64`
+## 📊 Build Matrix
 
-### For macOS builds:
-- `MACOS_CERTIFICATE_BASE64`
-- `MACOS_CERTIFICATE_PASSWORD`
-- `MACOS_NOTARIZATION_APPLE_ID`
-- `MACOS_NOTARIZATION_TEAM_ID`
-- `MACOS_NOTARIZATION_PASSWORD`
+### Supported Platforms & Architectures:
 
-## Usage Examples
+| Platform | Architecture | Target Triple | Runner |
+|----------|-------------|---------------|---------|
+| Windows | x64 | `x86_64-pc-windows-msvc` | `windows-latest` |
+| macOS | x64 | `x86_64-apple-darwin` | `macos-latest` |
+| macOS | arm64 | `aarch64-apple-darwin` | `macos-latest` |
+| Linux | x64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` |
+| Android | arm64 | `aarch64-linux-android` | `ubuntu-latest` |
+| iOS | arm64 | `aarch64-apple-ios` | `macos-latest` |
 
-### Manual Build
-```bash
-# Trigger a manual build of all platforms
-gh workflow run build.yml
-```
+## 🔧 Workflow Features
 
-### Manual Release
-```bash
-# Create a release with version v1.0.0
-gh workflow run release.yml --field version=v1.0.0 --field prerelease=false
-```
+### Performance Optimizations:
+- ✅ Rust dependency caching
+- ✅ Node.js dependency caching
+- ✅ Gradle caching (Android)
+- ✅ Android SDK caching
+- ✅ Parallel builds across platforms
 
-### Run Tests
-```bash
-# Run all tests
-gh workflow run test.yml
-```
+### Security Features:
+- ✅ Code signing for Apple platforms
+- ✅ Android app signing (optional)
+- ✅ Secure secret management
+- ✅ Environment-based protection
 
-### Manual Maintenance
-```bash
-# Run maintenance tasks
-gh workflow run maintenance.yml
-```
+### Quality Assurance:
+- ✅ Build status reporting
+- ✅ Artifact validation
+- ✅ Detailed build summaries
+- ✅ Error handling and cleanup
 
-## Best Practices
+## 📋 Build Status
 
-1. **Always use the core orchestrator**: Use `build.yml` for building, not individual platform workflows
-2. **Test before release**: The release workflow automatically runs tests
-3. **Use reusable workflows**: `extract-meta-information.yml` is used by multiple workflows
-4. **Monitor summaries**: Each workflow provides detailed summaries in the GitHub Actions UI
-5. **Keep secrets secure**: Never hardcode secrets in workflow files
+The main workflow provides a comprehensive build summary showing:
+- ✅/❌ Build status for each platform
+- 📦 Artifact generation status
+- 🔗 Links to download artifacts
+- 📊 Build duration and resource usage
 
-## Troubleshooting
+## 🛠️ Customization
 
-### Common Issues
+### Adding New Platforms:
+1. Create a new `build-{platform}.yml` workflow
+2. Follow the existing pattern with proper outputs
+3. Add to the main workflow's needs array
+4. Update the build summary
 
-1. **Version extraction fails**: Check that `package.json` exists and has a valid version field
-2. **Platform builds fail**: Check that all required secrets are configured
-3. **Tests fail**: Review the test summary for specific failure details
-4. **Release creation fails**: Ensure you have write permissions to the repository
+### Modifying Build Configuration:
+- Edit platform-specific workflows
+- Update build commands and targets
+- Modify artifact paths and naming
+- Adjust caching strategies
 
-### Debugging
+### Environment Configuration:
+- Use GitHub Environments for sensitive operations
+- Configure protection rules for production deployments
+- Set up approval workflows for releases
 
-1. Enable debug logging by setting `ACTIONS_STEP_DEBUG=true` in repository secrets
-2. Check workflow summaries for detailed status information
-3. Review individual job logs for specific error messages
+## 🐛 Troubleshooting
 
-## Contributing
+### Common Issues:
 
-When adding new workflows:
+1. **Missing Secrets**: Check [SECRETS.md](../SECRETS.md) for required secrets
+2. **Build Failures**: Check individual workflow logs for detailed errors
+3. **Artifact Issues**: Verify file paths and naming conventions
+4. **Signing Problems**: Ensure certificates and profiles are valid
 
-1. Follow the established naming convention
-2. Add appropriate triggers and environment variables
-3. Include comprehensive error handling
-4. Add summaries for better visibility
-5. Update this README with new workflow documentation
+### Debug Steps:
+1. Check workflow run logs
+2. Verify secret configuration
+3. Test locally with same commands
+4. Review platform-specific requirements
+
+## 📚 Resources
+
+- [Tauri Documentation](https://tauri.app/)
+- [GitHub Actions Documentation](https://docs.github.com/en/actions)
+- [Apple Developer Documentation](https://developer.apple.com/documentation/)
+- [Android Developer Documentation](https://developer.android.com/docs)

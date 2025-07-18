@@ -1,0 +1,102 @@
+name: 'CI/CD Pipeline'
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  extract-meta:
+    name: 'Extract Metadata'
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Extract metadata
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          
+          echo "📦 App Name: ${NAME}"
+          echo "🏷️ Version: ${VERSION}"
+
+  build-windows:
+    name: 'Build Windows'
+    needs: extract-meta
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-macos:
+    name: 'Build macOS'
+    needs: extract-meta
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-linux:
+    name: 'Build Linux'
+    needs: extract-meta
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-android:
+    name: 'Build Android'
+    needs: extract-meta
+    uses: ./.github/workflows/build-android.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-ios:
+    name: 'Build iOS'
+    needs: extract-meta
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  # Summary job that depends on all builds
+  build-summary:
+    name: 'Build Summary'
+    needs: [build-windows, build-macos, build-linux, build-android, build-ios]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status | Artifacts |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | ${{ needs.build-windows.result == 'success' && '✅' || '❌' }} ${{ needs.build-windows.result }} | ${{ needs.build-windows.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS | ${{ needs.build-macos.result == 'success' && '✅' || '❌' }} ${{ needs.build-macos.result }} | ${{ needs.build-macos.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux | ${{ needs.build-linux.result == 'success' && '✅' || '❌' }} ${{ needs.build-linux.result }} | ${{ needs.build-linux.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Android | ${{ needs.build-android.result == 'success' && '✅' || '❌' }} ${{ needs.build-android.result }} | ${{ needs.build-android.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| iOS | ${{ needs.build-ios.result == 'success' && '✅' || '❌' }} ${{ needs.build-ios.result }} | ${{ needs.build-ios.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Download artifacts from successful builds" >> $GITHUB_STEP_SUMMARY
+          echo "- Create a release using the **Release** workflow" >> $GITHUB_STEP_SUMMARY
+          echo "- Check individual build logs for any issues" >> $GITHUB_STEP_SUMMARY
+      

@@ -1,0 +1,209 @@
+name: 'Build macOS'
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: 'App name'
+        required: true
+        type: string
+      version:
+        description: 'App version'
+        required: true
+        type: string
+    outputs:
+      artifacts:
+        description: 'List of generated artifacts'
+        value: ${{ jobs.build.outputs.artifacts }}
+      status:
+        description: 'Build status'
+        value: ${{ jobs.build.outputs.status }}
+
+jobs:
+  build:
+    name: 'macOS Build'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    outputs:
+      artifacts: ${{ steps.build.outputs.artifacts }}
+      status: ${{ steps.build.outputs.status }}
+    environment: production
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: 'aarch64-apple-darwin'
+            arch: 'arm64'
+          - target: 'x86_64-apple-darwin'
+            arch: 'x64'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup macOS signing (macOS only)
+        env:
+          # https://tauri.app/distribute/sign/macos/
+          # ============ Signing ============
+          # https://developer.apple.com/account  -> Certificates, IDs & Profiles -> Certificates -> + -> Developer ID Application
+          # Make sure your are choosing the correct certificate Developer ID Application is for MacOS app.
+          # "This certificate is used to code sign your app for distribution outside of the Mac App Store Connect." —— Apple
+          # After download it, you should receieve something like developerID_application.cer
+          # Drag into keychain access, you should see something like Developer ID Application: ... 
+          # Right click, export it as .p12 file
+          # use b64_encode_apple_certificate.sh to convert it to base64 txt
+          # or openssl base64 -in "file.p12" -out "file.txt"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # The password of the .p12 file you set when export it from keychain access.
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # The password of your keychain access, normally your macos computer password.
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          # ============= Notarization ============
+          # Apple ID with Apple Developer account
+          APPLE_ID: ${{ secrets.APPLE_ID }} 
+          # https://account.apple.com/account/manage -> App-specific password -> Generate
+          # See Also: https://support.apple.com/zh-cn/102654
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # https://developer.apple.com/account -> drag down (or just search "Team ID")
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -v -p codesigning build.keychain
+          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application")
+          CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
+          echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
+          echo "Certificate imported."
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ runner.os }}-${{ matrix.target }}-rust
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build macOS app
+        id: build
+        run: |
+          echo "🔨 Building macOS app..."
+          pnpm tauri build --target ${{ matrix.target }}
+          
+          # Find generated artifacts
+          echo "📦 Locating artifacts..."
+          DMG_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" 2>/dev/null || echo "")
+          APP_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app" 2>/dev/null || echo "")
+          
+          # Create app.tar.gz from .app bundle
+          if [ -n "$APP_FILES" ]; then
+            for app in $APP_FILES; do
+              if [ -d "$app" ]; then
+                app_name=$(basename "$app")
+                tar_name="${app_name}.tar.gz"
+                tar -czf "$(dirname "$app")/$tar_name" -C "$(dirname "$app")" "$app_name"
+                echo "✅ Created: $tar_name"
+              fi
+            done
+          fi
+          
+          # Create artifacts list
+          ARTIFACTS=""
+          if [ -n "$DMG_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $DMG_FILES"
+          fi
+          
+          TAR_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.tar.gz" 2>/dev/null || echo "")
+          if [ -n "$TAR_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $TAR_FILES"
+          fi
+          
+          echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+          echo "✅ Build completed successfully"
+          echo "📦 Artifacts: $ARTIFACTS"
+
+      - name: Notarize macOS app
+        if: success() && env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "🔐 Notarizing macOS app..."
+          
+          # Notarize DMG files
+          for dmg in $(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" 2>/dev/null); do
+            if [ -f "$dmg" ]; then
+              echo "Notarizing $(basename "$dmg")..."
+              xcrun notarytool submit "$dmg" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" \
+                --wait
+              
+              # Staple the notarization
+              xcrun stapler staple "$dmg"
+              echo "✅ Notarized and stapled: $(basename "$dmg")"
+            fi
+          done
+
+      - name: Upload macOS artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-artifacts
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain build.keychain || true
+          rm -f certificate.p12 || true
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## macOS Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Architecture:** ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.build.outputs.status || 'failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.build.outputs.status }}" = "success" ]; then
+            echo "### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.dmg" -o -name "*.app.tar.gz" | head -10 >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+          fi

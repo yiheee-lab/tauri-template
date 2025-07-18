@@ -1,4 +1,4 @@
-name: 'Build Windows'
+name: 'Build Linux'
 
 on:
   workflow_call:
@@ -21,8 +21,8 @@ on:
 
 jobs:
   build:
-    name: 'Windows Build'
-    runs-on: windows-latest
+    name: 'Linux Build'
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     outputs:
@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: 'x86_64-pc-windows-msvc'
+          - target: 'x86_64-unknown-linux-gnu'
             arch: 'x64'
     
     steps:
@@ -52,6 +52,11 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -66,59 +71,62 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build Windows app
+      - name: Build Linux app
         id: build
         run: |
-          echo " Building Windows app..."
+          echo "🔨 Building Linux app..."
           pnpm tauri build --target ${{ matrix.target }}
           
           # Find generated artifacts
-          echo " Locating artifacts..."
-          MSI_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/msi -name "*.msi" 2>/dev/null || echo "")
-          NSIS_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/nsis -name "*-setup.exe" 2>/dev/null || echo "")
+          echo "📦 Locating artifacts..."
+          DEB_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/deb -name "*.deb" 2>/dev/null || echo "")
+          RPM_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/rpm -name "*.rpm" 2>/dev/null || echo "")
+          APPIMAGE_FILES=$(find src-tauri/target/${{ matrix.target }}/release/bundle/appimage -name "*.AppImage" 2>/dev/null || echo "")
           
           # Create artifacts list
           ARTIFACTS=""
-          if [ -n "$MSI_FILES" ]; then
-            ARTIFACTS="$ARTIFACTS $MSI_FILES"
+          if [ -n "$DEB_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $DEB_FILES"
           fi
-          if [ -n "$NSIS_FILES" ]; then
-            ARTIFACTS="$ARTIFACTS $NSIS_FILES"
+          if [ -n "$RPM_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $RPM_FILES"
+          fi
+          if [ -n "$APPIMAGE_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $APPIMAGE_FILES"
           fi
           
           echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
           
-          echo " Build completed successfully"
-          echo " Artifacts: $ARTIFACTS"
-        shell: bash
+          echo "✅ Build completed successfully"
+          echo "📦 Artifacts: $ARTIFACTS"
 
-      - name: Upload Windows artifacts
+      - name: Upload Linux artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}-artifacts
+          name: linux-${{ matrix.arch }}-artifacts
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
           retention-days: 30
           if-no-files-found: warn
 
       - name: Build summary
         if: always()
         run: |
-          echo "## Windows Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Linux Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
           echo "**Architecture:** ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** ${{ steps.build.outputs.status || 'failed' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ steps.build.outputs.status }}" = "success" ]; then
-            echo "###  Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.msi" -o -name "*-setup.exe" | head -10 >> $GITHUB_STEP_SUMMARY
+            find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" | head -10 >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo " Build failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
           fi
-        shell: bash

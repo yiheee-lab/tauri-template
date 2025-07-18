@@ -1,0 +1,274 @@
+name: 'Build iOS'
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: 'App name'
+        required: true
+        type: string
+      version:
+        description: 'App version'
+        required: true
+        type: string
+    outputs:
+      artifacts:
+        description: 'List of generated artifacts'
+        value: ${{ jobs.build.outputs.artifacts }}
+      status:
+        description: 'Build status'
+        value: ${{ jobs.build.outputs.status }}
+
+jobs:
+  build:
+    name: 'iOS Build'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    outputs:
+      artifacts: ${{ steps.build.outputs.artifacts }}
+      status: ${{ steps.build.outputs.status }}
+    environment: production
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: 'aarch64-apple-ios'
+            arch: 'arm64'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ runner.os }}-${{ matrix.target }}-rust
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Setup iOS signing
+        env:
+          # iOS signing requires:
+          # 1. Apple Developer Account
+          # 2. iOS Distribution Certificate (.p12 file)
+          # 3. Provisioning Profile (.mobileprovision file)
+          # 4. App Store Connect API Key (optional, for automatic upload)
+          
+          # ============ Signing Certificate ============
+          # Go to https://developer.apple.com/account/resources/certificates/list
+          # Create "iOS Distribution" certificate
+          # Download and export as .p12 file from Keychain Access
+          # Convert to base64: openssl base64 -in certificate.p12 -out certificate.txt
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          
+          # ============ Provisioning Profile ============
+          # Go to https://developer.apple.com/account/resources/profiles/list
+          # Create "App Store" provisioning profile
+          # Download .mobileprovision file
+          # Convert to base64: base64 -i profile.mobileprovision -o profile.txt
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          
+          # ============ App Store Connect API (Optional) ============
+          # For automatic upload to App Store Connect
+          # Go to https://appstoreconnect.apple.com/access/api
+          # Create API key and download .p8 file
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          
+          # ============ Team and Bundle ID ============
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+          
+          # Keychain password for CI
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "🔐 Setting up iOS signing..."
+          
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" ios-build.keychain
+          security default-keychain -s ios-build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" ios-build.keychain
+          security set-keychain-settings -t 3600 -u ios-build.keychain
+          
+          # Import certificate
+          if [ -n "$IOS_CERTIFICATE" ]; then
+            echo "$IOS_CERTIFICATE" | base64 --decode > ios-certificate.p12
+            security import ios-certificate.p12 -k ios-build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ios-build.keychain
+            
+            # Find certificate identity
+            CERT_INFO=$(security find-identity -v -p codesigning ios-build.keychain | grep "iPhone Distribution" || security find-identity -v -p codesigning ios-build.keychain | grep "Apple Distribution")
+            if [ -n "$CERT_INFO" ]; then
+              CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
+              echo "SIGNING_IDENTITY=$CERT_ID" >> $GITHUB_ENV
+              echo "✅ Certificate imported: $CERT_ID"
+            else
+              echo "❌ No valid iOS distribution certificate found"
+              exit 1
+            fi
+          else
+            echo "⚠️  No iOS certificate provided, building unsigned"
+          fi
+          
+          # Import provisioning profile
+          if [ -n "$IOS_PROVISIONING_PROFILE" ]; then
+            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+            echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+            echo "✅ Provisioning profile imported"
+          else
+            echo "⚠️  No provisioning profile provided"
+          fi
+
+      - name: Initialize iOS project
+        id: ios-init
+        run: |
+          echo "📱 Initializing iOS project..."
+          if [ ! -d "src-tauri/gen/ios" ]; then
+            pnpm tauri ios init
+            echo "initialized=true" >> $GITHUB_OUTPUT
+          else
+            echo "initialized=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure iOS project
+        if: steps.ios-init.outputs.initialized == 'true'
+        run: |
+          echo "⚙️  Configuring iOS project..."
+          
+          # Update iOS project configuration
+          if [ -n "$BUNDLE_ID" ]; then
+            # Update bundle identifier in iOS project
+            find src-tauri/gen/ios -name "*.pbxproj" -exec sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" {} \;
+            echo "✅ Bundle ID updated: $BUNDLE_ID"
+          fi
+          
+          if [ -n "$APPLE_TEAM_ID" ]; then
+            # Update development team
+            find src-tauri/gen/ios -name "*.pbxproj" -exec sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = $APPLE_TEAM_ID;/g" {} \;
+            echo "✅ Team ID updated: $APPLE_TEAM_ID"
+          fi
+
+      - name: Build iOS app
+        id: build
+        run: |
+          echo "🔨 Building iOS app..."
+          
+          # Build for iOS
+          if [ -n "$SIGNING_IDENTITY" ]; then
+            echo "🔐 Building with signing..."
+            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store
+          else
+            echo "⚠️  Building without signing..."
+            pnpm tauri ios build --target ${{ matrix.target }}
+          fi
+          
+          # Find generated artifacts
+          echo "📦 Locating artifacts..."
+          IPA_FILES=$(find src-tauri/gen/ios/build -name "*.ipa" 2>/dev/null || echo "")
+          APP_FILES=$(find src-tauri/gen/ios/build -name "*.app" 2>/dev/null || echo "")
+          
+          # Create artifacts list
+          ARTIFACTS=""
+          if [ -n "$IPA_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $IPA_FILES"
+          fi
+          if [ -n "$APP_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $APP_FILES"
+          fi
+          
+          echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+          echo "✅ Build completed successfully"
+          echo "📦 Artifacts: $ARTIFACTS"
+
+      - name: Upload to App Store Connect (Optional)
+        if: success() && env.APP_STORE_CONNECT_API_KEY != ''
+        run: |
+          echo "📤 Uploading to App Store Connect..."
+          
+          # Setup App Store Connect API key
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
+          
+          # Upload IPA files
+          for ipa in $(find src-tauri/gen/ios/build -name "*.ipa"); do
+            if [ -f "$ipa" ]; then
+              echo "Uploading $ipa..."
+              xcrun altool --upload-app --type ios --file "$ipa" \
+                --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
+                --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+            fi
+          done
+
+      - name: Upload iOS artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ matrix.arch }}-artifacts
+          path: |
+            src-tauri/gen/ios/build/**/*.ipa
+            src-tauri/gen/ios/build/**/*.app
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain ios-build.keychain || true
+          rm -f ios-certificate.p12 || true
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## iOS Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Architecture:** ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.build.outputs.status || 'failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.build.outputs.status }}" = "success" ]; then
+            echo "### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            find src-tauri/gen/ios/build -name "*.ipa" -o -name "*.app" 2>/dev/null | head -10 >> $GITHUB_STEP_SUMMARY || echo "No artifacts found"
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Required Secrets for iOS Build" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOS_CERTIFICATE\`: Base64 encoded .p12 certificate file" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOS_CERTIFICATE_PASSWORD\`: Password for the .p12 file" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOS_PROVISIONING_PROFILE\`: Base64 encoded .mobileprovision file" >> $GITHUB_STEP_SUMMARY
+          echo "- \`APPLE_TEAM_ID\`: Apple Developer Team ID" >> $GITHUB_STEP_SUMMARY
+          echo "- \`IOS_BUNDLE_ID\`: iOS app bundle identifier" >> $GITHUB_STEP_SUMMARY
+          echo "- \`KEYCHAIN_PASSWORD\`: Password for temporary keychain" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Optional Secrets for App Store Upload" >> $GITHUB_STEP_SUMMARY
+          echo "- \`APP_STORE_CONNECT_API_KEY\`: Base64 encoded .p8 API key file" >> $GITHUB_STEP_SUMMARY
+          echo "- \`APP_STORE_CONNECT_API_KEY_ID\`: API Key ID" >> $GITHUB_STEP_SUMMARY
+          echo "- \`APP_STORE_CONNECT_ISSUER_ID\`: Issuer ID" >> $GITHUB_STEP_SUMMARY

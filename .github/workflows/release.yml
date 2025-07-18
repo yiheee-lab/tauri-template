@@ -4,96 +4,206 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
-        required: true
-        type: string
-      prerelease:
-        description: 'Is this a pre-release?'
+        description: 'Release version (e.g., 1.0.0)'
         required: false
-        type: boolean
-        default: false
+        type: string
   push:
     tags:
       - 'v*'
 
-
 jobs:
-  # Extract version from package.json or use input
-  extract-meta-information:
-    uses: ./.github/workflows/extract-meta-information.yml
+  extract-meta:
+    name: 'Extract Metadata'
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Extract metadata
+        id: meta
+        run: |
+          # Get app name and version from package.json
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          
+          # Use input version if provided, otherwise use package.json version
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          
+          # Create tag
+          TAG="v${VERSION}"
+          
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          
+          echo "📦 App Name: ${NAME}"
+          echo "🏷️ Version: ${VERSION}"
+          echo "🔖 Tag: ${TAG}"
+
+  build-windows:
+    name: 'Build Windows'
+    needs: extract-meta
+    uses: ./.github/workflows/build-windows.yml
     with:
-      path: ${{ env.APP_PATH }}
-
-  # Run tests before release
-  run-tests:
-    uses: ./.github/workflows/test.yml
-
-  # Build all platforms for release
-  build-all-platforms:
-    needs: [extract-meta-information, run-tests]
-    uses: ./.github/workflows/build.yml
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
     secrets: inherit
 
-  # Create GitHub release
+  build-macos:
+    name: 'Build macOS'
+    needs: extract-meta
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-linux:
+    name: 'Build Linux'
+    needs: extract-meta
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-android:
+    name: 'Build Android'
+    needs: extract-meta
+    uses: ./.github/workflows/build-android.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
+  build-ios:
+    name: 'Build iOS'
+    needs: extract-meta
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      name: ${{ needs.extract-meta.outputs.name }}
+      version: ${{ needs.extract-meta.outputs.version }}
+    secrets: inherit
+
   create-release:
-    needs: [extract-meta-information, build-all-platforms]
+    name: 'Create Release'
+    needs: [extract-meta, build-windows, build-macos, build-linux, build-android, build-ios]
     runs-on: ubuntu-latest
+    if: always() && (needs.build-windows.result == 'success' || needs.build-macos.result == 'success' || needs.build-linux.result == 'success' || needs.build-android.result == 'success' || needs.build-ios.result == 'success')
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          else
-            echo "version=v${{ needs.extract-meta-information.outputs.version }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: ${{ github.event.inputs.prerelease || false }}
-          generate_release_notes: true
-          body: |
-            ## What's Changed
-            
-            This release includes builds for all supported platforms:
-            - 🤖 Android (APK)
-            - 🍎 iOS (IPA)
-            - 🖥️ macOS (DMG)
-            - 🐧 Ubuntu (AppImage, DEB)
-            - 🪟 Windows (MSI, EXE)
-            
-            ### Installation
-            
-            Download the appropriate file for your platform from the assets below.
-            
-            ### Verification
-            
-            All builds are signed and can be verified using the provided checksums.
-            
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ steps.version.outputs.version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ./artifacts
 
-  # Post-release notifications and cleanup
-  post-release:
-    needs: [create-release]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
+      - name: Organize artifacts
+        run: |
+          mkdir -p ./release-assets
+          
+          # Function to rename and move artifacts
+          rename_artifacts() {
+            local platform=$1
+            local arch=$2
+            local ext=$3
+            local source_pattern=$4
+            
+            for file in ./artifacts/$source_pattern; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                new_name="${{ needs.extract-meta.outputs.name }}-${{ needs.extract-meta.outputs.version }}-${platform}-${arch}.${ext}"
+                cp "$file" "./release-assets/$new_name"
+                echo "✅ Renamed: $filename -> $new_name"
+              fi
+            done
+          }
+          
+          # Rename artifacts according to the specified format
+          # Windows
+          rename_artifacts "win" "x64" "msi" "windows-*/*.msi"
+          rename_artifacts "win" "x64" "exe" "windows-*/*-setup.exe"
+          
+          # macOS
+          rename_artifacts "mac" "x64" "dmg" "macos-x64-*/*.dmg"
+          rename_artifacts "mac" "arm64" "dmg" "macos-arm64-*/*.dmg"
+          rename_artifacts "mac" "x64" "app.tar.gz" "macos-x64-*/*.app.tar.gz"
+          rename_artifacts "mac" "arm64" "app.tar.gz" "macos-arm64-*/*.app.tar.gz"
+          
+          # Linux
+          rename_artifacts "linux" "x64" "deb" "linux-*/*.deb"
+          rename_artifacts "linux" "x64" "rpm" "linux-*/*.rpm"
+          rename_artifacts "linux" "x64" "AppImage" "linux-*/*.AppImage"
+          
+          # Android
+          rename_artifacts "android" "arm64" "apk" "android-*/*.apk"
+          rename_artifacts "android" "arm64" "aab" "android-*/*.aab"
+          
+          # iOS
+          rename_artifacts "ios" "arm64" "ipa" "ios-*/*.ipa"
+          
+          # List all release assets
+          echo "📦 Release Assets:"
+          ls -la ./release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.extract-meta.outputs.tag }}
+          name: '${{ needs.extract-meta.outputs.name }} v${{ needs.extract-meta.outputs.version }}'
+          body: |
+            ## 🚀 Release ${{ needs.extract-meta.outputs.name }} v${{ needs.extract-meta.outputs.version }}
+            
+            ### 📋 Build Status
+            | Platform | Status |
+            |----------|--------|
+            | Windows | ${{ needs.build-windows.result == 'success' && '✅' || '❌' }} ${{ needs.build-windows.result }} |
+            | macOS | ${{ needs.build-macos.result == 'success' && '✅' || '❌' }} ${{ needs.build-macos.result }} |
+            | Linux | ${{ needs.build-linux.result == 'success' && '✅' || '❌' }} ${{ needs.build-linux.result }} |
+            | Android | ${{ needs.build-android.result == 'success' && '✅' || '❌' }} ${{ needs.build-android.result }} |
+            | iOS | ${{ needs.build-ios.result == 'success' && '✅' || '❌' }} ${{ needs.build-ios.result }} |
+            
+            ### 📥 Download
+            Choose the appropriate file for your platform and architecture.
+            
+            **File naming convention:** `name-version-platform-architecture.extension`
+            
+            ### 🔧 Installation
+            - **Windows**: Download and run the `.msi` or `.exe` file
+            - **macOS**: Download and open the `.dmg` file
+            - **Linux**: Download the `.deb`, `.rpm`, or `.AppImage` file
+            - **Android**: Download and install the `.apk` file
+            - **iOS**: Download the `.ipa` file (requires developer account for installation)
+          draft: false
+          prerelease: ${{ contains(needs.extract-meta.outputs.version, 'beta') || contains(needs.extract-meta.outputs.version, 'alpha') || contains(needs.extract-meta.outputs.version, 'rc') }}
+          files: ./release-assets/*
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Release Summary
         run: |
-          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "🎉 Release ${{ needs.create-release.outputs.version || 'Unknown' }} has been created!" >> $GITHUB_STEP_SUMMARY
-          echo "📦 All platform builds have been attached to the release." >> $GITHUB_STEP_SUMMARY
-          echo "🔗 [View Release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** ${{ needs.extract-meta.outputs.name }} v${{ needs.extract-meta.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ needs.extract-meta.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | ${{ needs.build-windows.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS | ${{ needs.build-macos.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux | ${{ needs.build-linux.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Android | ${{ needs.build-android.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| iOS | ${{ needs.build-ios.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Assets" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ls -la ./release-assets/ >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,310 @@
+name: 'Build Android'
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: 'App name'
+        required: true
+        type: string
+      version:
+        description: 'App version'
+        required: true
+        type: string
+    outputs:
+      artifacts:
+        description: 'List of generated artifacts'
+        value: ${{ jobs.build.outputs.artifacts }}
+      status:
+        description: 'Build status'
+        value: ${{ jobs.build.outputs.status }}
+
+jobs:
+  build:
+    name: 'Android Build'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      artifacts: ${{ steps.build.outputs.artifacts }}
+      status: ${{ steps.build.outputs.status }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: 'aarch64-linux-android'
+            arch: 'arm64'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_SDK_ROOT }}
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('src-tauri/gen/android/build.gradle') }}
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-
+
+      - name: Setup Android NDK
+        run: |
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653" --sdk_root=${ANDROID_SDK_ROOT}
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Setup Android cross-compilation environment
+        run: |
+          # Setup Android cross-compilation environment variables
+          echo "CC_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" >> $GITHUB_ENV
+          
+          # Create cargo config directory
+          mkdir -p ~/.cargo
+          
+          # Create cargo config file
+          cat > ~/.cargo/config.toml << EOF
+          [target.aarch64-linux-android]
+          ar = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          EOF
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ runner.os }}-${{ matrix.target }}-rust
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            src-tauri/gen/android/.gradle
+            src-tauri/gen/android/app/.gradle
+            src-tauri/gen/android/app/build
+          key: ${{ runner.os }}-gradle-${{ hashFiles('src-tauri/gen/android/**/*.gradle*') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Initialize Android project
+        id: android-init
+        run: |
+          echo "📱 Initializing Android project..."
+          if [ ! -d "src-tauri/gen/android" ]; then
+            pnpm tauri android init
+            echo "initialized=true" >> $GITHUB_OUTPUT
+          else
+            echo "initialized=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure Gradle for CI
+        run: |
+          echo "⚙️  Configuring Gradle for CI..."
+          mkdir -p src-tauri/gen/android
+          cat > src-tauri/gen/android/gradle.properties << EOF
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.configureondemand=true
+          android.enableJetifier=false
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+      - name: Setup Gradle wrapper cache
+        if: steps.android-init.outputs.initialized == 'true'
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.9
+          cache-read-only: false
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            jdks
+            wrapper
+
+      - name: Configure Gradle daemon
+        run: |
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties << EOF
+          org.gradle.daemon=true
+          org.gradle.configureondemand=true
+          org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+          EOF
+
+      - name: Setup Android signing (Optional)
+        env:
+          # Android signing requires:
+          # 1. Keystore file (.jks or .keystore)
+          # 2. Keystore password
+          # 3. Key alias
+          # 4. Key password
+          
+          # ============ Signing Configuration ============
+          # Generate keystore: keytool -genkey -v -keystore release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias release
+          # Convert to base64: base64 -i release-key.jks -o release-key.txt
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            echo "🔐 Setting up Android signing..."
+            
+            # Create keystore file
+            echo "$ANDROID_KEYSTORE" | base64 --decode > release-key.jks
+            
+            # Update signing configuration in build.gradle
+            if [ -f "src-tauri/gen/android/app/build.gradle" ]; then
+              cat >> src-tauri/gen/android/app/build.gradle << EOF
+          
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file('../../../../release-key.jks')
+                      storePassword '$ANDROID_KEYSTORE_PASSWORD'
+                      keyAlias '$ANDROID_KEY_ALIAS'
+                      keyPassword '$ANDROID_KEY_PASSWORD'
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+              echo "✅ Android signing configured"
+            fi
+          else
+            echo "⚠️  No Android keystore provided, building unsigned APK"
+          fi
+
+      - name: Build Android app
+        id: build
+        run: |
+          echo "🔨 Building Android app..."
+          
+          # Build APK and AAB
+          pnpm tauri android build --apk --aab --target ${{ matrix.target }}
+          
+          # Find generated artifacts
+          echo "📦 Locating artifacts..."
+          APK_FILES=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" 2>/dev/null || echo "")
+          AAB_FILES=$(find src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" 2>/dev/null || echo "")
+          
+          # Rename artifacts with proper naming convention
+          if [ -n "$APK_FILES" ]; then
+            for apk in $APK_FILES; do
+              if [ -f "$apk" ]; then
+                dir=$(dirname "$apk")
+                new_name="${{ inputs.name }}-${{ inputs.version }}-android-${{ matrix.arch }}.apk"
+                mv "$apk" "$dir/$new_name"
+                echo "✅ Renamed APK: $new_name"
+              fi
+            done
+          fi
+          
+          if [ -n "$AAB_FILES" ]; then
+            for aab in $AAB_FILES; do
+              if [ -f "$aab" ]; then
+                dir=$(dirname "$aab")
+                new_name="${{ inputs.name }}-${{ inputs.version }}-android-${{ matrix.arch }}.aab"
+                mv "$aab" "$dir/$new_name"
+                echo "✅ Renamed AAB: $new_name"
+              fi
+            done
+          fi
+          
+          # Create artifacts list
+          ARTIFACTS=""
+          NEW_APK_FILES=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" 2>/dev/null || echo "")
+          NEW_AAB_FILES=$(find src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" 2>/dev/null || echo "")
+          
+          if [ -n "$NEW_APK_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $NEW_APK_FILES"
+          fi
+          if [ -n "$NEW_AAB_FILES" ]; then
+            ARTIFACTS="$ARTIFACTS $NEW_AAB_FILES"
+          fi
+          
+          echo "artifacts=$ARTIFACTS" >> $GITHUB_OUTPUT
+          echo "status=success" >> $GITHUB_OUTPUT
+          
+          echo "✅ Build completed successfully"
+          echo "📦 Artifacts: $ARTIFACTS"
+
+      - name: Upload Android artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.arch }}-artifacts
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f release-key.jks || true
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Android Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Architecture:** ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.build.outputs.status || 'failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.build.outputs.status }}" = "success" ]; then
+            echo "### 📦 Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            find src-tauri/gen/android/app/build/outputs -name "*.apk" -o -name "*.aab" 2>/dev/null | head -10 >> $GITHUB_STEP_SUMMARY || echo "No artifacts found"
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Optional Secrets for Android Signing" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ANDROID_KEYSTORE\`: Base64 encoded .jks keystore file" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ANDROID_KEYSTORE_PASSWORD\`: Keystore password" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ANDROID_KEY_ALIAS\`: Key alias" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ANDROID_KEY_PASSWORD\`: Key password" >> $GITHUB_STEP_SUMMARY
