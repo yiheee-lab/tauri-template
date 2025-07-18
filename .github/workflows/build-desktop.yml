@@ -24,8 +24,49 @@ jobs:
             args: ''
 
     runs-on: ${{ matrix.platform }}
+    env:
+      # https://tauri.app/distribute/sign/macos/
+      sign-macos: true
+      # Apple ID with Apple Developer account
+      APPLE_ID: ${{ secrets.APPLE_ID }} 
+      # https://account.apple.com/account/manage -> App-specific password -> Generate
+      # See Also: https://support.apple.com/zh-cn/102654
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    
+    environment: macos-signing-secrets
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify macOS certificate
+        env:
+          # https://developer.apple.com/account  -> Certificates, IDs & Profiles -> Certificates -> + -> Developer ID Application
+          # Make sure your are choosing the correct certificate Developer ID Application is for MacOS app.
+          # "This certificate is used to code sign your app for distribution outside of the Mac App Store Connect." —— Apple
+          # After download it, you should receieve something like developerID_application.cer
+          # Drag into keychain access, you should see something like Developer ID Application: ... 
+          # Right click, export it as .p12 file
+          # use apple-certificate.sh to convert it to base64 txt
+          # or openssl base64 -in "file.p12" -out "file.txt"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # The password of the .p12 file you set when export it from keychain access.
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # The password of your keychain access, normally your macos computer password.
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        if: matrix.platform == 'macos-latest' && env.sign-macos
+        run: |
+          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security find-identity -v -p codesigning build.keychain
+          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application")
+          CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
+          echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
+          echo "Certificate imported."
+          
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -68,6 +109,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ env.CERT_ID }}
         with:
           tagName: app-v${{ steps.package-version.outputs.version }}
           releaseName: 'App v${{ steps.package-version.outputs.version }}'
