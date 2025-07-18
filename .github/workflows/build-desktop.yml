@@ -25,13 +25,8 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     env:
-      # https://tauri.app/distribute/sign/macos/
       sign-macos: true
-      # Apple ID with Apple Developer account
-      APPLE_ID: ${{ secrets.APPLE_ID }} 
-      # https://account.apple.com/account/manage -> App-specific password -> Generate
-      # See Also: https://support.apple.com/zh-cn/102654
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
     
     environment: macos-signing-secrets
     steps:
@@ -39,6 +34,8 @@ jobs:
 
       - name: Verify macOS certificate
         env:
+          # https://tauri.app/distribute/sign/macos/
+          # ============ Signing ============
           # https://developer.apple.com/account  -> Certificates, IDs & Profiles -> Certificates -> + -> Developer ID Application
           # Make sure your are choosing the correct certificate Developer ID Application is for MacOS app.
           # "This certificate is used to code sign your app for distribution outside of the Mac App Store Connect." —— Apple
@@ -52,6 +49,14 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           # The password of your keychain access, normally your macos computer password.
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          # ============= Notarization ============
+          # Apple ID with Apple Developer account
+          APPLE_ID: ${{ secrets.APPLE_ID }} 
+          # https://account.apple.com/account/manage -> App-specific password -> Generate
+          # See Also: https://support.apple.com/zh-cn/102654
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # https://developer.apple.com/account -> drag down (or just search "Team ID")
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         if: matrix.platform == 'macos-latest' && env.sign-macos
         run: |
           echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
