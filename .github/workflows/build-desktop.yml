@@ -172,12 +172,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-     
-      - name: Initialize Android project (Android only)
-        if: matrix.os_name == 'android'
-        run: |
-          cd src-tauri
-          cargo tauri android init
 
       - name: Build Android APK (Android only)
         if: matrix.os_name == 'android'
