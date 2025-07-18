@@ -172,11 +172,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-
-      - name: Build Android APK (Android only)
+     
+      - name: Build Android app (Android only)
         if: matrix.os_name == 'android'
         run: |
           cd src-tauri
+          cargo install tauri-cli
+          cargo tauri android init
           cargo tauri android build --apk
 
       - name: Upload Android APK (Android only)
