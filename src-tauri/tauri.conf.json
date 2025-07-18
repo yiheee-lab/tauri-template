@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "tauri-template",
   "version": "0.1.0",
-  "identifier": "com.yihe.ee",
+  "identifier": "ee.yihe.tauri-template",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",

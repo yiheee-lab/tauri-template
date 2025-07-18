@@ -176,10 +176,8 @@ jobs:
       - name: Build Android app (Android only)
         if: matrix.os_name == 'android'
         run: |
-          cd src-tauri
-          cargo install tauri-cli
-          cargo tauri android init
-          cargo tauri android build --apk
+          pnpm tauri android init
+          pnpm tauri android build --apk
 
       - name: Upload Android APK (Android only)
         if: matrix.os_name == 'android'
