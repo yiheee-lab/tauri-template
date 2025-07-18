@@ -157,7 +157,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build desktop app
+        if: matrix.os_name != 'android'
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -170,3 +172,22 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+     
+      - name: Initialize Android project (Android only)
+        if: matrix.os_name == 'android'
+        run: |
+          cd src-tauri
+          cargo tauri android init
+
+      - name: Build Android APK (Android only)
+        if: matrix.os_name == 'android'
+        run: |
+          cd src-tauri
+          cargo tauri android build --apk
+
+      - name: Upload Android APK (Android only)
+        if: matrix.os_name == 'android'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
