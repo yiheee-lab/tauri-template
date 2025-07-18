@@ -41,6 +41,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Java 17 (Android only)
+        if: matrix.android
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup Android SDK (Android only)
         if: matrix.android
         uses: android-actions/setup-android@v3
