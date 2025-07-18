@@ -15,25 +15,31 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+            os_name: 'macOS-arm64'
           - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+            os_name: 'macOS-x64'
           - platform: 'ubuntu-22.04'
-            args: ''
+            target: ''
+            os_name: 'linux'
           - platform: 'ubuntu-22.04'
-            args: '--target aarch64-linux-android'
+            target: 'aarch64-linux-android'
             android: true
+            os_name: 'android'
           - platform: 'windows-latest'
-            args: ''
+            target: ''
+            os_name: 'windows'
 
     runs-on: ${{ matrix.platform }}
     env:
       sign-macos: true
 
-    
-    environment: macos-signing-secrets
+    environment: ${{ matrix.platform == 'macos-latest' && 'macos-signing-secrets' || '' }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Android SDK (Android only)
         if: matrix.android
@@ -44,7 +50,7 @@ jobs:
           arch: 'arm64-v8a'
           ndk: '23.1.7779620'
 
-      - name: Verify macOS certificate (macOS only)
+      - name: Setup macOS signing (macOS only)
         if: matrix.platform == 'macos-latest' && env.sign-macos
         env:
           # https://tauri.app/distribute/sign/macos/
@@ -84,7 +90,7 @@ jobs:
           echo "CERT_ID=$CERT_ID" >> $GITHUB_ENV
           echo "Certificate imported."
 
-      - name: install dependencies (ubuntu only)
+      - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04' && !matrix.android
         run: |
           sudo apt-get update
@@ -96,30 +102,31 @@ jobs:
           version: 10
           run_install: false
 
-      - name: setup node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
           cache: 'pnpm'
 
-      - name: Read version from package.json
+      - name: Get app version
         id: package-version
         shell: bash # Fix Windows shell issue https://github.com/yiheee-lab/tauri-template/actions/runs/16364222356/job/46237818305
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
 
-      - name: install Rust stable
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target || '' }}
 
-      - name: Rust cache
+      - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          key: ${{ runner.os }}-${{ matrix.target || 'native' }}-rust
 
-      - name: install frontend dependencies
+      - name: Install frontend dependencies
         run: pnpm install
 
       - uses: tauri-apps/tauri-action@v0
@@ -134,4 +141,4 @@ jobs:
           releaseBody: 'See the assets to download this version and install.'
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
