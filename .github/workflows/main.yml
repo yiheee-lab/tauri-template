@@ -35,6 +35,8 @@ jobs:
   build-windows:
     name: 'Build Windows'
     needs: extract-meta
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-windows.yml
     with:
       name: ${{ needs.extract-meta.outputs.name }}
@@ -44,6 +46,8 @@ jobs:
   build-macos:
     name: 'Build macOS'
     needs: extract-meta
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-macos.yml
     with:
       name: ${{ needs.extract-meta.outputs.name }}
@@ -53,6 +57,8 @@ jobs:
   build-linux:
     name: 'Build Linux'
     needs: extract-meta
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-linux.yml
     with:
       name: ${{ needs.extract-meta.outputs.name }}
@@ -62,6 +68,8 @@ jobs:
   build-android:
     name: 'Build Android'
     needs: extract-meta
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-android.yml
     with:
       name: ${{ needs.extract-meta.outputs.name }}
@@ -71,6 +79,8 @@ jobs:
   build-ios:
     name: 'Build iOS'
     needs: extract-meta
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-ios.yml
     with:
       name: ${{ needs.extract-meta.outputs.name }}
