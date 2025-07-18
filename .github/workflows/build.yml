@@ -11,12 +11,15 @@ on:
 
 jobs:
   extract-meta-information:
+    permissions:
+      contents: write
     uses: ./.github/workflows/extract-meta-information.yml
     with:
       path: "./"
 
-  # Build for all platforms in parallel
   build-android:
+    permissions:
+      contents: write
     needs: extract-meta-information
     uses: ./.github/workflows/build-sign-android.yml
     with:
@@ -26,15 +29,20 @@ jobs:
     secrets: inherit
 
   build-ios:
+    permissions:
+      contents: write
     needs: extract-meta-information
     uses: ./.github/workflows/build-sign-ios.yml
     with:
       name: "tauri-template"
       version: ${{ needs.extract-meta-information.outputs.version }}
       path: "./"
+
     secrets: inherit
 
   build-macos:
+    permissions:
+      contents: write
     needs: extract-meta-information
     uses: ./.github/workflows/build-sign-macos.yml
     with:
@@ -44,6 +52,8 @@ jobs:
     secrets: inherit
 
   build-ubuntu:
+    permissions:
+      contents: write
     needs: extract-meta-information
     uses: ./.github/workflows/build-ubuntu.yml
     with:
@@ -53,6 +63,8 @@ jobs:
     secrets: inherit
 
   build-windows:
+    permissions:
+      contents: write
     needs: extract-meta-information
     uses: ./.github/workflows/build-windows.yml
     with:
@@ -63,6 +75,8 @@ jobs:
 
   # Summary job that depends on all builds
   build-summary:
+    permissions:
+      contents: write
     needs: [build-android, build-ios, build-macos, build-ubuntu, build-windows]
     runs-on: ubuntu-latest
     if: always()
