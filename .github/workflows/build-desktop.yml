@@ -47,6 +47,7 @@ jobs:
 
       - name: Read version from package.json
         id: package-version
+        shell: bash # Fix Windows shell issue https://github.com/yiheee-lab/tauri-template/actions/runs/16364222356/job/46237818305
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
