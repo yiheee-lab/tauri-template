@@ -1,10 +1,17 @@
-name: 'publish'
+name: build-windows
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      name:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      path:
+        required: true
+        type: string
 
 jobs:
   publish-tauri:
@@ -14,18 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            target: 'aarch64-apple-darwin'
-            os_name: 'macOS-arm64'
-          - platform: 'macos-latest'
-            target: 'x86_64-apple-darwin'
-            os_name: 'macOS-x64'
-          - platform: 'ubuntu-22.04'
-            target: ''
-            os_name: 'linux'
-          - platform: 'ubuntu-22.04'
-            target: 'aarch64-linux-android'
-            os_name: 'android'
           - platform: 'windows-latest'
             target: ''
             os_name: 'windows'
@@ -176,6 +171,7 @@ jobs:
       - name: Build Android app (Android only)
         if: matrix.os_name == 'android'
         run: |
+          cd ${}
           pnpm tauri android init
           pnpm tauri android build --apk
 

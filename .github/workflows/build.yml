@@ -1,0 +1,85 @@
+name: 'Build and Publish'
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  APP_NAME: "tauri-template"
+  APP_PATH: "./"
+
+jobs:
+  # Extract version from package.json using reusable workflow
+  extract-version:
+    uses: ./.github/workflows/extract-version.yml
+    with:
+      path: ${{ env.APP_PATH }}
+
+  # Build for all platforms in parallel
+  build-android:
+    needs: extract-version
+    uses: ./.github/workflows/build-sign-android.yml
+    with:
+      name: ${{ env.APP_NAME }}
+      version: ${{ needs.extract-version.outputs.version }}
+      path: ${{ env.APP_PATH }}
+    secrets: inherit
+
+  build-ios:
+    needs: extract-version
+    uses: ./.github/workflows/build-sign-ios.yml
+    with:
+      name: ${{ env.APP_NAME }}
+      version: ${{ needs.extract-version.outputs.version }}
+      path: ${{ env.APP_PATH }}
+    secrets: inherit
+
+  build-macos:
+    needs: extract-version
+    uses: ./.github/workflows/build-sign-macos.yml
+    with:
+      name: ${{ env.APP_NAME }}
+      version: ${{ needs.extract-version.outputs.version }}
+      path: ${{ env.APP_PATH }}
+    secrets: inherit
+
+  build-ubuntu:
+    needs: extract-version
+    uses: ./.github/workflows/build-ubuntu.yml
+    with:
+      name: ${{ env.APP_NAME }}
+      version: ${{ needs.extract-version.outputs.version }}
+      path: ${{ env.APP_PATH }}
+    secrets: inherit
+
+  build-windows:
+    needs: extract-version
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      name: ${{ env.APP_NAME }}
+      version: ${{ needs.extract-version.outputs.version }}
+      path: ${{ env.APP_PATH }}
+    secrets: inherit
+
+  # Summary job that depends on all builds
+  build-summary:
+    needs: [build-android, build-ios, build-macos, build-ubuntu, build-windows]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Android | ${{ needs.build-android.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| iOS | ${{ needs.build-ios.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS | ${{ needs.build-macos.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ubuntu | ${{ needs.build-ubuntu.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | ${{ needs.build-windows.result }} |" >> $GITHUB_STEP_SUMMARY
+      

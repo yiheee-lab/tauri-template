@@ -1,0 +1,102 @@
+name: 'Release'
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+env:
+  APP_NAME: "tauri-template"
+  APP_PATH: "./"
+
+jobs:
+  # Extract version from package.json or use input
+  extract-version:
+    uses: ./.github/workflows/extract-version.yml
+    with:
+      path: ${{ env.APP_PATH }}
+
+  # Run tests before release
+  run-tests:
+    uses: ./.github/workflows/test.yml
+
+  # Build all platforms for release
+  build-all-platforms:
+    needs: [extract-version, run-tests]
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  # Create GitHub release
+  create-release:
+    needs: [extract-version, build-all-platforms]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "version=v${{ needs.extract-version.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
+          body: |
+            ## What's Changed
+            
+            This release includes builds for all supported platforms:
+            - 🤖 Android (APK)
+            - 🍎 iOS (IPA)
+            - 🖥️ macOS (DMG)
+            - 🐧 Ubuntu (AppImage, DEB)
+            - 🪟 Windows (MSI, EXE)
+            
+            ### Installation
+            
+            Download the appropriate file for your platform from the assets below.
+            
+            ### Verification
+            
+            All builds are signed and can be verified using the provided checksums.
+            
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ steps.version.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Post-release notifications and cleanup
+  post-release:
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Release Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 Release ${{ needs.create-release.outputs.version || 'Unknown' }} has been created!" >> $GITHUB_STEP_SUMMARY
+          echo "📦 All platform builds have been attached to the release." >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Release](https://github.com/${{ github.repository }}/releases/latest)" >> $GITHUB_STEP_SUMMARY
