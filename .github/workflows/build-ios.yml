@@ -23,12 +23,12 @@ jobs:
   build:
     name: 'iOS Build'
     runs-on: macos-latest
+    environment: production
     permissions:
       contents: write
     outputs:
       artifacts: ${{ steps.build.outputs.artifacts }}
       status: ${{ steps.build.outputs.status }}
-    environment: production
     
     strategy:
       fail-fast: false

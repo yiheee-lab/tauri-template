@@ -23,6 +23,7 @@ jobs:
   build:
     name: 'macOS Build'
     runs-on: macos-latest
+    environment: production
     permissions:
       contents: write
     outputs:

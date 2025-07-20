@@ -128,10 +128,37 @@ Examples:
 
 ### Required Secrets
 
-For signing and publishing (see [SECRETS.md](../SECRETS.md)):
-- `APPLE_CERTIFICATE_*` - macOS/iOS code signing
-- `ANDROID_KEYSTORE_*` - Android app signing
-- `WINDOWS_CERTIFICATE_*` - Windows code signing
+The workflows use **explicit secret passing** for better security and clarity.
+
+For detailed setup instructions, see [SECRETS_SETUP.md](../SECRETS_SETUP.md).
+
+#### Platform-Specific Secrets:
+
+**Android Signing:**
+- `ANDROID_KEY_BASE64` - Base64 encoded keystore file
+- `ANDROID_KEY_ALIAS` - Key alias
+- `ANDROID_KEY_PASSWORD` - Key password
+
+**Apple/macOS Signing:**
+- `APPLE_CERTIFICATE` - Base64 encoded certificate
+- `APPLE_CERTIFICATE_PASSWORD` - Certificate password
+- `APPLE_ID` - Apple ID email
+- `APPLE_APP_SPECIFIC_PASSWORD` - App-specific password
+- `APPLE_TEAM_ID` - Developer team ID
+- `KEYCHAIN_PASSWORD` - Keychain password
+
+**iOS Specific:**
+- `IOS_CERTIFICATE` - Base64 encoded iOS certificate
+- `IOS_CERTIFICATE_PASSWORD` - Certificate password
+- `IOS_PROVISIONING_PROFILE` - Base64 encoded provisioning profile
+- `IOS_BUNDLE_ID` - App bundle identifier
+- `APP_STORE_CONNECT_API_KEY` - App Store Connect API key (optional)
+- `APP_STORE_CONNECT_API_KEY_ID` - API key ID (optional)
+- `APP_STORE_CONNECT_ISSUER_ID` - Issuer ID (optional)
+
+**Windows Signing (Optional):**
+- `WINDOWS_CERTIFICATE` - Base64 encoded certificate
+- `WINDOWS_CERTIFICATE_PASSWORD` - Certificate password
 
 ### Customization
 

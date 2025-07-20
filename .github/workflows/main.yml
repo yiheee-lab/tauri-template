@@ -11,37 +11,24 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - '.github/workflows/release.yml'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
 
 jobs:
-  # Version check and auto-increment job
   version-check:
     name: 'Version Check & Auto-increment'
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/version-check.yml
     with:
       skip-version-check: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-version-check || false }}
-    secrets: inherit
 
-  # Extract metadata job (runs for all triggers)
   extract-metadata:
     name: 'Extract Metadata'
-    # Skip if version-check ran and determined we shouldn't proceed
     if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true')
     needs: [version-check]
     uses: ./.github/workflows/extract-metadata.yml
-    secrets: inherit
 
-  # Build jobs - only run if we should proceed
   build-windows:
     name: 'Build Windows'
     needs: [version-check, extract-metadata]
@@ -52,10 +39,6 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
-      # Windows signing secrets (optional)
-      # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
   build-macos:
     name: 'Build macOS'
@@ -67,14 +50,6 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets:
-      # Apple signing and notarization secrets
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
 
   build-linux:
     name: 'Build Linux'
@@ -86,10 +61,6 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets:
-      # Linux builds typically don't require signing secrets
-      # Add any Linux-specific secrets here if needed
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
     name: 'Build Android'
@@ -101,12 +72,6 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets:
-      # Android signing secrets
-      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEY_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
   build-ios:
     name: 'Build iOS'
@@ -118,20 +83,7 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets:
-      # iOS signing and App Store Connect secrets
-      IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
-      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-      IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-      IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      # App Store Connect API secrets
-      APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
 
-  # Summary job that depends on all builds
   build-summary:
     name: 'Build Summary'
     needs: [version-check, extract-metadata, build-windows, build-macos, build-linux, build-android, build-ios]
@@ -202,7 +154,6 @@ jobs:
             echo "- A new CI/CD pipeline should start automatically" >> $GITHUB_STEP_SUMMARY
           fi
 
-  # Auto-release job - only runs on main branch push with successful builds
   auto-release:
     name: 'Auto Release'
     needs: [version-check, extract-metadata, build-windows, build-macos, build-linux, build-android, build-ios, build-summary]
