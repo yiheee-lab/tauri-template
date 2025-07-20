@@ -208,14 +208,15 @@ jobs:
 
       - name: Build iOS app
         id: build
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           echo "🔨 Building iOS app..."
           
           # Build for iOS
           if [ -n "$SIGNING_IDENTITY" ]; then
             echo "🔐 Building with signing..."
-            # 使用命令行参数直接传递开发团队ID
-            pnpm tauri ios build --target ${{ matrix.target }} --development-team "$APPLE_TEAM_ID" --export-method app-store-connect
+            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store-connect
           else
             echo "⚠️  Building without signing..."
             pnpm tauri ios build --target ${{ matrix.target }}
