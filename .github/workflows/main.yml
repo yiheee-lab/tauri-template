@@ -50,7 +50,8 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-
+    secrets: inherit
+    
   build-linux:
     name: 'Build Linux'
     needs: [version-check, extract-metadata]
@@ -72,6 +73,7 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
+    secrets: inherit
 
   build-ios:
     name: 'Build iOS'
@@ -83,6 +85,7 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
+    secrets: inherit
 
   build-summary:
     name: 'Build Summary'
