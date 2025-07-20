@@ -52,10 +52,10 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets:
+    secrets: inherit
       # Windows signing secrets (optional)
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
   build-macos:
     name: 'Build macOS'
