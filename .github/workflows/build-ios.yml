@@ -145,14 +145,7 @@ jobs:
           else
             echo "⚠️  No provisioning profile provided"
           fi
-          echo "📱 Initializing iOS project..."
-          if [ ! -d "src-tauri/gen/ios" ]; then
-            pnpm tauri ios init
-            echo "initialized=true" >> $GITHUB_OUTPUT
-          else
-            echo "initialized=false" >> $GITHUB_OUTPUT
-          fi
-          
+
       - name: Build iOS app
         id: build
         env:
