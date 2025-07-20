@@ -117,11 +117,17 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" ios-build.keychain
           security set-keychain-settings -t 3600 -u ios-build.keychain
           
+          # Add keychain to search list
+          security list-keychains -d user -s ios-build.keychain login.keychain
+          
           # Import certificate
           if [ -n "$IOS_CERTIFICATE" ]; then
             echo "$IOS_CERTIFICATE" | base64 --decode > ios-certificate.p12
-            security import ios-certificate.p12 -k ios-build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security import ios-certificate.p12 -k ios-build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
             security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" ios-build.keychain
+            
+            # Grant access to codesign and other tools
+            security set-key-partition-list -S apple-tool:,apple:,codesign:,productbuild:,productsign: -s -k "$KEYCHAIN_PASSWORD" ios-build.keychain
             
             # Find certificate identity
             CERT_INFO=$(security find-identity -v -p codesigning ios-build.keychain | grep "iPhone Distribution" || security find-identity -v -p codesigning ios-build.keychain | grep "Apple Distribution")
@@ -156,17 +162,30 @@ jobs:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
           BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           echo "🔨 Building iOS app..."
           
-          # Build for iOS
-          if [ -n "$SIGNING_IDENTITY" ]; then
+          # Set up environment for Tauri
+          if [ -n "$SIGNING_IDENTITY" ] && [ -n "$APPLE_TEAM_ID" ]; then
             echo "🔐 Building with signing..."
+            echo "Using signing identity: $SIGNING_IDENTITY"
+            echo "Using team ID: $APPLE_TEAM_ID"
+            
+            # Make sure the keychain is accessible
+            security list-keychains -s ios-build.keychain
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" ios-build.keychain
+            
+            # Export environment variables for Tauri
+            export APPLE_DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
+            export APPLE_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+            
             pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store-connect
           else
             echo "⚠️  Building without signing..."
+            echo "Missing signing identity or team ID"
             pnpm tauri ios build --target ${{ matrix.target }}
           fi
           
