@@ -152,54 +152,7 @@ jobs:
           else
             echo "initialized=false" >> $GITHUB_OUTPUT
           fi
-
-          echo "⚙️  Configuring iOS project..."
           
-          # Update iOS project configuration
-          if [ -n "$BUNDLE_ID" ]; then
-            # Update bundle identifier in iOS project
-            find src-tauri/gen/ios -name "*.pbxproj" -exec sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = .*/PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID;/g" {} \;
-            echo "✅ Bundle ID updated: $BUNDLE_ID"
-          fi
-          
-          if [ -n "$APPLE_TEAM_ID" ]; then
-            echo "🔧 Setting development team: $APPLE_TEAM_ID"
-            
-            # Method 1: Update existing DEVELOPMENT_TEAM entries
-            find src-tauri/gen/ios -name "*.pbxproj" -exec sed -i '' "s/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = $APPLE_TEAM_ID;/g" {} \;
-            
-            # Method 2: Add DEVELOPMENT_TEAM if not present (more robust)
-            find src-tauri/gen/ios -name "*.pbxproj" -exec sed -i '' "/PRODUCT_BUNDLE_IDENTIFIER/a\\
-            DEVELOPMENT_TEAM = $APPLE_TEAM_ID;" {} \;
-            
-            # Method 3: Use xcodebuild to set team ID (most reliable)
-            if [ -f "src-tauri/gen/ios/app.xcodeproj/project.pbxproj" ]; then
-              # Set team ID for all targets
-              cd src-tauri/gen/ios
-              xcodebuild -project app.xcodeproj -list | grep "Targets:" -A 10 | grep -v "Targets:" | while read target; do
-                if [ -n "$target" ]; then
-                  target_clean=$(echo "$target" | xargs)
-                  if [ -n "$target_clean" ]; then
-                    echo "Setting team ID for target: $target_clean"
-                    xcodebuild -project app.xcodeproj -target "$target_clean" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" -showBuildSettings > /dev/null 2>&1 || true
-                  fi
-                fi
-              done
-              cd ../../..
-            fi
-            
-            echo "✅ Team ID updated: $APPLE_TEAM_ID"
-            
-            # Verify team ID was set
-            if grep -q "DEVELOPMENT_TEAM = $APPLE_TEAM_ID" src-tauri/gen/ios/app.xcodeproj/project.pbxproj; then
-              echo "✅ Team ID verification successful"
-            else
-              echo "⚠️  Team ID verification failed, but continuing..."
-            fi
-          else
-            echo "⚠️  No Apple Team ID provided - builds may fail without signing"
-          fi
-
       - name: Build iOS app
         id: build
         env:
