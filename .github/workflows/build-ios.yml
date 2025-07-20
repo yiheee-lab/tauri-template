@@ -214,9 +214,8 @@ jobs:
           # Build for iOS
           if [ -n "$SIGNING_IDENTITY" ]; then
             echo "🔐 Building with signing..."
-            # Set APPLE_DEVELOPMENT_TEAM environment variable for Tauri CLI
-            export APPLE_DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
-            pnpm tauri ios build --target ${{ matrix.target }} --export-method app-store-connect
+            # 使用命令行参数直接传递开发团队ID
+            pnpm tauri ios build --target ${{ matrix.target }} --development-team "$APPLE_TEAM_ID" --export-method app-store-connect
           else
             echo "⚠️  Building without signing..."
             pnpm tauri ios build --target ${{ matrix.target }}
