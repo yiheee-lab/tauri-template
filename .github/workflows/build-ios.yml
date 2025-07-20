@@ -68,7 +68,7 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Setup iOS signing
+      - name: Setup iOS
         env:
           # iOS signing requires:
           # 1. Apple Developer Account
@@ -145,10 +145,6 @@ jobs:
           else
             echo "⚠️  No provisioning profile provided"
           fi
-
-      - name: Initialize iOS project
-        id: ios-init
-        run: |
           echo "📱 Initializing iOS project..."
           if [ ! -d "src-tauri/gen/ios" ]; then
             pnpm tauri ios init
@@ -157,8 +153,6 @@ jobs:
             echo "initialized=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Configure iOS project
-        run: |
           echo "⚙️  Configuring iOS project..."
           
           # Update iOS project configuration
@@ -209,7 +203,15 @@ jobs:
       - name: Build iOS app
         id: build
         env:
-          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           echo "🔨 Building iOS app..."
           
