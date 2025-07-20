@@ -56,15 +56,15 @@ This directory contains the CI/CD workflows for the Tauri template project. The 
 
 ### Triggering Conditions
 
-| Event | Version Check | Build Process |
-|-------|---------------|---------------|
-| Push to `main` | ✅ Yes | Only if version is unique |
-| Pull Request | ❌ No | ✅ Yes (always) |
-| Manual Dispatch | 🔧 Optional | ✅ Yes |
+| Event | Version Check | Build Process | Auto-Release |
+|-------|---------------|---------------|-------------|
+| Push to `main` | ✅ Yes | Only if version is unique | ✅ Yes (if builds succeed) |
+| Pull Request | ❌ No | ✅ Yes (always) | ❌ No |
+| Manual Dispatch | 🔧 Optional | ✅ Yes | ❌ No |
 
 ## 🚀 Usage
 
-### Automatic Builds
+### Automatic Builds & Releases
 
 Simply push to `main` branch:
 ```bash
@@ -75,7 +75,8 @@ The workflow will:
 1. Check if your version conflicts with existing releases
 2. Auto-increment if needed, or proceed with build
 3. Build for all platforms
-4. Generate build summary
+4. **Automatically create a GitHub release with tag** (if builds succeed)
+5. Generate build summary with release links
 
 ### Manual Builds
 
@@ -85,13 +86,17 @@ Use GitHub Actions UI to trigger manually:
 3. Click **Run workflow**
 4. Optionally skip version check
 
-### Creating Releases
+### Manual Releases
 
-After successful builds:
+**Automatic releases** are created for successful main branch builds.
+
+For manual releases:
 1. Go to **Actions** tab
 2. Select **Release** workflow
 3. Click **Run workflow**
 4. Specify version tag (e.g., `v1.0.0`)
+
+**Note:** Auto-releases only occur for pushes to `main` branch with successful builds.
 
 ## 📋 Build Outputs
 
@@ -204,6 +209,10 @@ graph TD
     I --> L
     J --> L
     K --> L
+    L --> M{Builds Successful?}
+    M -->|Yes| N[auto-release]
+    M -->|No| O[End]
+    N --> P[Create Tag & Release]
 ```
 
 This architecture ensures reliable, automated builds with intelligent version management and comprehensive platform support.

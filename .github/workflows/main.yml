@@ -52,7 +52,10 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
+    secrets:
+      # Windows signing secrets (optional)
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
   build-macos:
     name: 'Build macOS'
@@ -64,7 +67,14 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
+    secrets:
+      # Apple signing and notarization secrets
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
 
   build-linux:
     name: 'Build Linux'
@@ -76,7 +86,10 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
+    secrets:
+      # Linux builds typically don't require signing secrets
+      # Add any Linux-specific secrets here if needed
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-android:
     name: 'Build Android'
@@ -88,7 +101,12 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
+    secrets:
+      # Android signing secrets
+      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEY_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
   build-ios:
     name: 'Build iOS'
@@ -100,7 +118,18 @@ jobs:
     with:
       name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
       version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
-    secrets: inherit
+    secrets:
+      # iOS signing and App Store Connect secrets
+      IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+      IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      # App Store Connect API secrets
+      APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
 
   # Summary job that depends on all builds
   build-summary:
@@ -108,8 +137,12 @@ jobs:
     needs: [version-check, extract-metadata, build-windows, build-macos, build-linux, build-android, build-ios]
     runs-on: ubuntu-latest
     if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true')
+    outputs:
+      success-count: ${{ steps.summary.outputs.success-count }}
+      should-release: ${{ steps.summary.outputs.should-release }}
     steps:
       - name: Build Summary
+        id: summary
         run: |
           echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -133,14 +166,28 @@ jobs:
           echo "| iOS | ${{ needs.build-ios.result == 'success' && '✅ Success' || needs.build-ios.result == 'failure' && '❌ Failed' || needs.build-ios.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-ios.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Next steps
+          # Calculate success count and determine if we should release
           SUCCESS_COUNT=$(echo "${{ needs.build-windows.result == 'success' && '1' || '0' }} + ${{ needs.build-macos.result == 'success' && '1' || '0' }} + ${{ needs.build-linux.result == 'success' && '1' || '0' }} + ${{ needs.build-android.result == 'success' && '1' || '0' }} + ${{ needs.build-ios.result == 'success' && '1' || '0' }}" | bc 2>/dev/null || echo "0")
+          
+          echo "success-count=${SUCCESS_COUNT}" >> $GITHUB_OUTPUT
+          
+          # Only auto-release if we're on main branch and have successful builds
+          if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "$SUCCESS_COUNT" -gt "0" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "should-release=true" >> $GITHUB_OUTPUT
+            echo "🚀 Will auto-create release with ${SUCCESS_COUNT} successful build(s)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "should-release=false" >> $GITHUB_OUTPUT
+          fi
           
           echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
           if [ "$SUCCESS_COUNT" -gt "0" ]; then
             echo "- ✅ **${SUCCESS_COUNT}** platform(s) built successfully" >> $GITHUB_STEP_SUMMARY
-            echo "- 📦 Download artifacts from the **Actions** tab" >> $GITHUB_STEP_SUMMARY
-            echo "- 🚀 Create a release using the **Release** workflow" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ github.event_name }}" = "push" ]; then
+              echo "- 🚀 **Auto-release will be created automatically**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- 📦 Download artifacts from the **Actions** tab" >> $GITHUB_STEP_SUMMARY
+              echo "- 🚀 Create a release using the **Release** workflow" >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "- ❌ No successful builds - check individual build logs" >> $GITHUB_STEP_SUMMARY
             echo "- 🔍 Review error messages and fix issues" >> $GITHUB_STEP_SUMMARY
@@ -154,3 +201,140 @@ jobs:
             echo "- Version was automatically incremented due to conflict" >> $GITHUB_STEP_SUMMARY
             echo "- A new CI/CD pipeline should start automatically" >> $GITHUB_STEP_SUMMARY
           fi
+
+  # Auto-release job - only runs on main branch push with successful builds
+  auto-release:
+    name: 'Auto Release'
+    needs: [version-check, extract-metadata, build-windows, build-macos, build-linux, build-android, build-ios, build-summary]
+    runs-on: ubuntu-latest
+    if: needs.build-summary.outputs.should-release == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Organize artifacts
+        run: |
+          mkdir -p ./release-assets
+          
+          # Function to rename and move artifacts
+          rename_artifacts() {
+            local platform=$1
+            local arch=$2
+            local ext=$3
+            local source_pattern=$4
+            
+            for file in ./artifacts/$source_pattern; do
+              if [ -f "$file" ]; then
+                filename=$(basename "$file")
+                new_name="${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}-${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}-${platform}-${arch}.${ext}"
+                cp "$file" "./release-assets/$new_name"
+                echo "✅ Renamed: $filename -> $new_name"
+              fi
+            done
+          }
+          
+          # Windows
+          rename_artifacts "windows" "x64" "msi" "windows-*/*.msi"
+          rename_artifacts "windows" "x64" "exe" "windows-*/*.exe"
+          
+          # macOS
+          rename_artifacts "macos" "universal" "dmg" "macos-*/*.dmg"
+          rename_artifacts "macos" "x64" "app.tar.gz" "macos-x64-*/*.app.tar.gz"
+          rename_artifacts "macos" "arm64" "app.tar.gz" "macos-arm64-*/*.app.tar.gz"
+          
+          # Linux
+          rename_artifacts "linux" "x64" "deb" "linux-*/*.deb"
+          rename_artifacts "linux" "x64" "rpm" "linux-*/*.rpm"
+          rename_artifacts "linux" "x64" "AppImage" "linux-*/*.AppImage"
+          
+          # Android
+          rename_artifacts "android" "universal" "apk" "android-*/*.apk"
+          rename_artifacts "android" "universal" "aab" "android-*/*.aab"
+          
+          # iOS
+          rename_artifacts "ios" "universal" "ipa" "ios-*/*.ipa"
+          
+          # List all release assets
+          echo "📦 Release Assets:"
+          ls -la ./release-assets/ || echo "No artifacts found"
+
+      - name: Create Release Tag and GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APP_NAME="${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}"
+          VERSION="${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}"
+          TAG="v${VERSION}"
+          
+          echo "🏷️ Creating release: ${TAG}"
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          ## 🚀 Release ${APP_NAME} v${VERSION}
+          
+          **Auto-generated release from CI/CD pipeline**
+          
+          ### 📋 Build Status
+          | Platform | Status |
+          |----------|--------|
+          | Windows | ${{ needs.build-windows.result == 'success' && '✅ Success' || '❌ Failed' }} |
+          | macOS | ${{ needs.build-macos.result == 'success' && '✅ Success' || '❌ Failed' }} |
+          | Linux | ${{ needs.build-linux.result == 'success' && '✅ Success' || '❌ Failed' }} |
+          | Android | ${{ needs.build-android.result == 'success' && '✅ Success' || '❌ Failed' }} |
+          | iOS | ${{ needs.build-ios.result == 'success' && '✅ Success' || '❌ Failed' }} |
+          
+          ### 📥 Download
+          Choose the appropriate file for your platform and architecture.
+          
+          **File naming convention:** \`name-version-platform-architecture.extension\`
+          
+          ### 🔧 Installation
+          - **Windows**: Download and run the \`.msi\` or \`.exe\` file
+          - **macOS**: Download and open the \`.dmg\` file
+          - **Linux**: Download the \`.deb\`, \`.rpm\`, or \`.AppImage\` file
+          - **Android**: Download and install the \`.apk\` file
+          - **iOS**: Download the \`.ipa\` file (requires developer account for installation)
+          
+          ### 📝 Changes
+          This release was automatically generated from commit: \`${{ github.sha }}\`
+          
+          **Commit message:** ${{ github.event.head_commit.message }}
+          EOF
+          
+          # Create the release
+          gh release create "${TAG}" \
+            --title "${APP_NAME} v${VERSION}" \
+            --notes-file release_notes.md \
+            --draft=false \
+            --prerelease=${{ contains(needs.extract-metadata.outputs.version, 'beta') || contains(needs.extract-metadata.outputs.version, 'alpha') || contains(needs.extract-metadata.outputs.version, 'rc') }} \
+            ./release-assets/* || true
+          
+          echo "🎉 Release ${TAG} created successfully!"
+
+      - name: Release Summary
+        run: |
+          APP_NAME="${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}"
+          VERSION="${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}"
+          TAG="v${VERSION}"
+          
+          echo "## 🎉 Auto-Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** ${APP_NAME} v${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "**Successful Builds:** ${{ needs.build-summary.outputs.success-count }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [📋 View Release](https://github.com/${{ github.repository }}/releases/tag/${TAG})" >> $GITHUB_STEP_SUMMARY
+          echo "- [📦 Download Assets](https://github.com/${{ github.repository }}/releases/tag/${TAG})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Assets" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          ls -la ./release-assets/ >> $GITHUB_STEP_SUMMARY || echo "No assets" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
