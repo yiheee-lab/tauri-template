@@ -2,111 +2,155 @@ name: 'CI/CD Pipeline'
 
 on:
   workflow_dispatch:
+    inputs:
+      skip-version-check:
+        description: 'Skip version check (force build current version)'
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - '.github/workflows/release.yml'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
 
 jobs:
-  extract-meta:
-    name: 'Extract Metadata'
-    runs-on: ubuntu-latest
-    outputs:
-      name: ${{ steps.meta.outputs.name }}
-      version: ${{ steps.meta.outputs.version }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        
-      - name: Extract metadata
-        id: meta
-        run: |
-          NAME=$(node -p "require('./package.json').name")
-          VERSION=$(node -p "require('./package.json').version")
-          
-          echo "name=${NAME}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          
-          echo "📦 App Name: ${NAME}"
-          echo "🏷️ Version: ${VERSION}"
+  # Version check and auto-increment job
+  version-check:
+    name: 'Version Check & Auto-increment'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/version-check.yml
+    with:
+      skip-version-check: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-version-check || false }}
+    secrets: inherit
 
+  # Extract metadata job (runs for all triggers)
+  extract-metadata:
+    name: 'Extract Metadata'
+    # Skip if version-check ran and determined we shouldn't proceed
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true')
+    needs: [version-check]
+    uses: ./.github/workflows/extract-metadata.yml
+    secrets: inherit
+
+  # Build jobs - only run if we should proceed
   build-windows:
     name: 'Build Windows'
-    needs: extract-meta
+    needs: [version-check, extract-metadata]
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true') && needs.extract-metadata.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/build-windows.yml
     with:
-      name: ${{ needs.extract-meta.outputs.name }}
-      version: ${{ needs.extract-meta.outputs.version }}
+      name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
+      version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
     secrets: inherit
 
   build-macos:
     name: 'Build macOS'
-    needs: extract-meta
+    needs: [version-check, extract-metadata]
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true') && needs.extract-metadata.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/build-macos.yml
     with:
-      name: ${{ needs.extract-meta.outputs.name }}
-      version: ${{ needs.extract-meta.outputs.version }}
+      name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
+      version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
     secrets: inherit
 
   build-linux:
     name: 'Build Linux'
-    needs: extract-meta
+    needs: [version-check, extract-metadata]
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true') && needs.extract-metadata.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/build-linux.yml
     with:
-      name: ${{ needs.extract-meta.outputs.name }}
-      version: ${{ needs.extract-meta.outputs.version }}
+      name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
+      version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
     secrets: inherit
 
   build-android:
     name: 'Build Android'
-    needs: extract-meta
+    needs: [version-check, extract-metadata]
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true') && needs.extract-metadata.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/build-android.yml
     with:
-      name: ${{ needs.extract-meta.outputs.name }}
-      version: ${{ needs.extract-meta.outputs.version }}
+      name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
+      version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
     secrets: inherit
 
   build-ios:
     name: 'Build iOS'
-    needs: extract-meta
+    needs: [version-check, extract-metadata]
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true') && needs.extract-metadata.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/build-ios.yml
     with:
-      name: ${{ needs.extract-meta.outputs.name }}
-      version: ${{ needs.extract-meta.outputs.version }}
+      name: ${{ needs.version-check.outputs.name || needs.extract-metadata.outputs.name }}
+      version: ${{ needs.version-check.outputs.version || needs.extract-metadata.outputs.version }}
     secrets: inherit
 
   # Summary job that depends on all builds
   build-summary:
     name: 'Build Summary'
-    needs: [build-windows, build-macos, build-linux, build-android, build-ios]
+    needs: [version-check, extract-metadata, build-windows, build-macos, build-linux, build-android, build-ios]
     runs-on: ubuntu-latest
-    if: always()
+    if: always() && (needs.version-check.result == 'skipped' || needs.version-check.outputs.should-proceed == 'true')
     steps:
       - name: Build Summary
         run: |
           echo "## 🏗️ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Version information
+          if [ "${{ needs.version-check.result }}" != "skipped" ]; then
+            echo "### 📋 Version Information" >> $GITHUB_STEP_SUMMARY
+            echo "- **App Name:** ${{ needs.version-check.outputs.name }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ needs.version-check.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Build results table
+          echo "### 🏗️ Build Results" >> $GITHUB_STEP_SUMMARY
           echo "| Platform | Status | Artifacts |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|-----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Windows | ${{ needs.build-windows.result == 'success' && '✅' || '❌' }} ${{ needs.build-windows.result }} | ${{ needs.build-windows.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| macOS | ${{ needs.build-macos.result == 'success' && '✅' || '❌' }} ${{ needs.build-macos.result }} | ${{ needs.build-macos.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux | ${{ needs.build-linux.result == 'success' && '✅' || '❌' }} ${{ needs.build-linux.result }} | ${{ needs.build-linux.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Android | ${{ needs.build-android.result == 'success' && '✅' || '❌' }} ${{ needs.build-android.result }} | ${{ needs.build-android.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| iOS | ${{ needs.build-ios.result == 'success' && '✅' || '❌' }} ${{ needs.build-ios.result }} | ${{ needs.build-ios.outputs.artifacts && '📦' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows | ${{ needs.build-windows.result == 'success' && '✅ Success' || needs.build-windows.result == 'failure' && '❌ Failed' || needs.build-windows.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-windows.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS | ${{ needs.build-macos.result == 'success' && '✅ Success' || needs.build-macos.result == 'failure' && '❌ Failed' || needs.build-macos.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-macos.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux | ${{ needs.build-linux.result == 'success' && '✅ Success' || needs.build-linux.result == 'failure' && '❌ Failed' || needs.build-linux.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-linux.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Android | ${{ needs.build-android.result == 'success' && '✅ Success' || needs.build-android.result == 'failure' && '❌ Failed' || needs.build-android.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-android.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| iOS | ${{ needs.build-ios.result == 'success' && '✅ Success' || needs.build-ios.result == 'failure' && '❌ Failed' || needs.build-ios.result == 'cancelled' && '🚫 Cancelled' || '⏭️ Skipped' }} | ${{ needs.build-ios.outputs.artifacts && '📦 Available' || '❌ None' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Next steps
+          SUCCESS_COUNT=$(echo "${{ needs.build-windows.result == 'success' && '1' || '0' }} + ${{ needs.build-macos.result == 'success' && '1' || '0' }} + ${{ needs.build-linux.result == 'success' && '1' || '0' }} + ${{ needs.build-android.result == 'success' && '1' || '0' }} + ${{ needs.build-ios.result == 'success' && '1' || '0' }}" | bc 2>/dev/null || echo "0")
+          
           echo "### 📋 Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "- Download artifacts from successful builds" >> $GITHUB_STEP_SUMMARY
-          echo "- Create a release using the **Release** workflow" >> $GITHUB_STEP_SUMMARY
-          echo "- Check individual build logs for any issues" >> $GITHUB_STEP_SUMMARY
-      
+          if [ "$SUCCESS_COUNT" -gt "0" ]; then
+            echo "- ✅ **${SUCCESS_COUNT}** platform(s) built successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Download artifacts from the **Actions** tab" >> $GITHUB_STEP_SUMMARY
+            echo "- 🚀 Create a release using the **Release** workflow" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ No successful builds - check individual build logs" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔍 Review error messages and fix issues" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔄 Re-run failed jobs or push fixes" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Version check summary if applicable
+          if [ "${{ needs.version-check.result }}" != "skipped" ] && [ "${{ needs.version-check.outputs.should-proceed }}" = "false" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Version Auto-increment" >> $GITHUB_STEP_SUMMARY
+            echo "- Version was automatically incremented due to conflict" >> $GITHUB_STEP_SUMMARY
+            echo "- A new CI/CD pipeline should start automatically" >> $GITHUB_STEP_SUMMARY
+          fi

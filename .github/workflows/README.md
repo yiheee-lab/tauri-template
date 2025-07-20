@@ -1,176 +1,209 @@
 # GitHub Actions Workflows
 
-This directory contains a unified CI/CD pipeline for building and releasing Tauri applications across all platforms.
+This directory contains the CI/CD workflows for the Tauri template project. The workflows are designed with automatic version management and comprehensive cross-platform building.
 
 ## 🏗️ Workflow Architecture
 
-### Main Workflows
+### Core Workflows
 
-| Workflow | Purpose | Trigger | Description |
-|----------|---------|---------|-------------|
-| **main.yml** | CI/CD Pipeline | Push to main, PR, Manual | Builds all platforms in parallel |
-| **release.yml** | Release Creation | Tag push, Manual | Creates unified release with proper naming |
+1. **[main.yml](./main.yml)** - Main CI/CD Pipeline
+   - Orchestrates the entire build process
+   - Includes automatic version checking and increment
+   - Builds for all platforms (Windows, macOS, Linux, Android, iOS)
+
+2. **[release.yml](./release.yml)** - Release Creation
+   - Creates GitHub releases with artifacts
+   - Handles release notes and asset uploads
+
+### Utility Workflows
+
+3. **[version-check.yml](./version-check.yml)** - Version Management
+   - Compares current version with latest release
+   - Auto-increments version if conflict detected
+   - Updates both `package.json` and `src-tauri/Cargo.toml`
+
+4. **[extract-metadata.yml](./extract-metadata.yml)** - Metadata Extraction
+   - Extracts app name and version from `package.json`
+   - Provides reusable metadata for other workflows
 
 ### Platform-Specific Build Workflows
 
-| Workflow | Platform | Artifacts | Signing |
-|----------|----------|-----------|---------|
-| **build-windows.yml** | Windows | `.msi`, `.exe` | ❌ Unsigned |
-| **build-macos.yml** | macOS | `.dmg`, `.app.tar.gz` | ✅ Code signing + Notarization |
-| **build-linux.yml** | Linux | `.deb`, `.rpm`, `.AppImage` | ❌ Unsigned |
-| **build-android.yml** | Android | `.apk`, `.aab` | ✅ Optional signing |
-| **build-ios.yml** | iOS | `.ipa` | ✅ Code signing + Provisioning |
+5. **[build-windows.yml](./build-windows.yml)** - Windows builds (.msi, .exe)
+6. **[build-macos.yml](./build-macos.yml)** - macOS builds (.dmg, .app.tar.gz)
+7. **[build-linux.yml](./build-linux.yml)** - Linux builds (.deb, .rpm, .AppImage)
+8. **[build-android.yml](./build-android.yml)** - Android builds (.apk, .aab)
+9. **[build-ios.yml](./build-ios.yml)** - iOS builds (.ipa)
 
-## 📁 Artifact Naming Convention
+## 🔄 Automatic Version Management
 
-All artifacts follow the unified naming convention:
-```
-{name}-{version}-{platform}-{architecture}.{extension}
-```
+### How It Works
 
-### Examples:
-- `tauri-template-1.0.0-win-x64.msi`
-- `tauri-template-1.0.0-mac-arm64.dmg`
-- `tauri-template-1.0.0-linux-x64.deb`
-- `tauri-template-1.0.0-android-arm64.apk`
-- `tauri-template-1.0.0-ios-arm64.ipa`
+1. **Version Check**: When code is pushed to `main`, the workflow compares the current `package.json` version with the latest GitHub release.
+
+2. **Auto-Increment**: If versions match (indicating a duplicate), the workflow:
+   - Increments the patch version (e.g., `1.0.0` → `1.0.1`)
+   - Updates `package.json` and `src-tauri/Cargo.toml`
+   - Commits changes with `[skip ci]` message
+   - Pushes to repository, triggering a new CI/CD run
+
+3. **Build Process**: If version is unique, proceeds with normal CI/CD pipeline.
+
+### Version Format
+
+- Uses semantic versioning: `MAJOR.MINOR.PATCH`
+- Auto-increment only affects PATCH version
+- Manual version changes (MAJOR/MINOR) are respected
+
+### Triggering Conditions
+
+| Event | Version Check | Build Process |
+|-------|---------------|---------------|
+| Push to `main` | ✅ Yes | Only if version is unique |
+| Pull Request | ❌ No | ✅ Yes (always) |
+| Manual Dispatch | 🔧 Optional | ✅ Yes |
 
 ## 🚀 Usage
 
-### Development Workflow (CI/CD Pipeline)
+### Automatic Builds
 
-Triggered automatically on:
-- Push to `main` branch
-- Pull requests to `main` branch
-- Manual dispatch
-
+Simply push to `main` branch:
 ```bash
-# Workflow runs automatically, or trigger manually:
-gh workflow run "CI/CD Pipeline"
+git push origin main
 ```
 
-### Release Workflow
+The workflow will:
+1. Check if your version conflicts with existing releases
+2. Auto-increment if needed, or proceed with build
+3. Build for all platforms
+4. Generate build summary
 
-Triggered by:
-- Creating a git tag: `git tag v1.0.0 && git push origin v1.0.0`
-- Manual dispatch with version input
+### Manual Builds
 
-```bash
-# Create and push a tag
-git tag v1.0.0
-git push origin v1.0.0
+Use GitHub Actions UI to trigger manually:
+1. Go to **Actions** tab
+2. Select **CI/CD Pipeline**
+3. Click **Run workflow**
+4. Optionally skip version check
 
-# Or trigger manually
-gh workflow run "Release" -f version=1.0.0
+### Creating Releases
+
+After successful builds:
+1. Go to **Actions** tab
+2. Select **Release** workflow
+3. Click **Run workflow**
+4. Specify version tag (e.g., `v1.0.0`)
+
+## 📋 Build Outputs
+
+### Artifact Naming Convention
+
+All artifacts follow the pattern:
+```
+{app-name}-{version}-{platform}-{architecture}.{extension}
 ```
 
-## 🔐 Required Secrets
+Examples:
+- `tauri-template-1.0.0-windows-x64.msi`
+- `tauri-template-1.0.0-macos-universal.dmg`
+- `tauri-template-1.0.0-linux-x64.AppImage`
+- `tauri-template-1.0.0-android-universal.apk`
+- `tauri-template-1.0.0-ios-universal.ipa`
 
-See [SECRETS.md](../SECRETS.md) for detailed setup instructions.
+### Platform Support
 
-### Quick Reference:
+| Platform | Architectures | Formats |
+|----------|---------------|---------|
+| Windows | x64, x86, ARM64 | `.msi`, `.exe` |
+| macOS | Universal, Intel, Apple Silicon | `.dmg`, `.app.tar.gz` |
+| Linux | x64, ARM64 | `.deb`, `.rpm`, `.AppImage` |
+| Android | Universal, ARM64, ARMv7, x86_64 | `.apk`, `.aab` |
+| iOS | Universal | `.ipa` |
 
-#### iOS (Required for iOS builds):
-- `IOS_CERTIFICATE`
-- `IOS_CERTIFICATE_PASSWORD`
-- `IOS_PROVISIONING_PROFILE`
-- `APPLE_TEAM_ID`
-- `IOS_BUNDLE_ID`
-- `KEYCHAIN_PASSWORD`
+## 🔧 Configuration
 
-#### macOS (Required for macOS builds):
-- `APPLE_CERTIFICATE`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `KEYCHAIN_PASSWORD`
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID`
+### Required Secrets
 
-#### Android (Optional for signed builds):
-- `ANDROID_KEYSTORE`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
+For signing and publishing (see [SECRETS.md](../SECRETS.md)):
+- `APPLE_CERTIFICATE_*` - macOS/iOS code signing
+- `ANDROID_KEYSTORE_*` - Android app signing
+- `WINDOWS_CERTIFICATE_*` - Windows code signing
 
-## 📊 Build Matrix
+### Customization
 
-### Supported Platforms & Architectures:
+#### Skip Version Check
+```yaml
+# In workflow_dispatch input
+skip-version-check: true
+```
 
-| Platform | Architecture | Target Triple | Runner |
-|----------|-------------|---------------|---------|
-| Windows | x64 | `x86_64-pc-windows-msvc` | `windows-latest` |
-| macOS | x64 | `x86_64-apple-darwin` | `macos-latest` |
-| macOS | arm64 | `aarch64-apple-darwin` | `macos-latest` |
-| Linux | x64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` |
-| Android | arm64 | `aarch64-linux-android` | `ubuntu-latest` |
-| iOS | arm64 | `aarch64-apple-ios` | `macos-latest` |
+#### Modify Build Platforms
+Edit `main.yml` to include/exclude platform builds:
+```yaml
+# Comment out unwanted platforms
+# build-ios:
+#   name: 'Build iOS'
+#   ...
+```
 
-## 🔧 Workflow Features
+#### Change Version Increment Logic
+Modify `version-check.yml` to change increment behavior:
+```bash
+# Current: increments patch (1.0.0 → 1.0.1)
+NEW_PATCH=$((PATCH + 1))
 
-### Performance Optimizations:
-- ✅ Rust dependency caching
-- ✅ Node.js dependency caching
-- ✅ Gradle caching (Android)
-- ✅ Android SDK caching
-- ✅ Parallel builds across platforms
+# Alternative: increment minor (1.0.0 → 1.1.0)
+NEW_MINOR=$((MINOR + 1))
+NEW_VERSION="${MAJOR}.${NEW_MINOR}.0"
+```
 
-### Security Features:
-- ✅ Code signing for Apple platforms
-- ✅ Android app signing (optional)
-- ✅ Secure secret management
-- ✅ Environment-based protection
+## 🛠️ Troubleshooting
 
-### Quality Assurance:
-- ✅ Build status reporting
-- ✅ Artifact validation
-- ✅ Detailed build summaries
-- ✅ Error handling and cleanup
+### Common Issues
 
-## 📋 Build Status
+1. **Version Increment Loop**
+   - Check for `[skip ci]` in commit messages
+   - Verify git configuration in workflow
 
-The main workflow provides a comprehensive build summary showing:
-- ✅/❌ Build status for each platform
-- 📦 Artifact generation status
-- 🔗 Links to download artifacts
-- 📊 Build duration and resource usage
+2. **Build Failures**
+   - Check individual platform workflow logs
+   - Verify dependencies and signing certificates
 
-## 🛠️ Customization
+3. **Missing Artifacts**
+   - Ensure build completed successfully
+   - Check artifact retention settings
 
-### Adding New Platforms:
-1. Create a new `build-{platform}.yml` workflow
-2. Follow the existing pattern with proper outputs
-3. Add to the main workflow's needs array
-4. Update the build summary
+### Debug Mode
 
-### Modifying Build Configuration:
-- Edit platform-specific workflows
-- Update build commands and targets
-- Modify artifact paths and naming
-- Adjust caching strategies
+Enable debug logging by setting repository secret:
+```
+ACTIONS_STEP_DEBUG = true
+```
 
-### Environment Configuration:
-- Use GitHub Environments for sensitive operations
-- Configure protection rules for production deployments
-- Set up approval workflows for releases
+## 📚 Related Documentation
 
-## 🐛 Troubleshooting
-
-### Common Issues:
-
-1. **Missing Secrets**: Check [SECRETS.md](../SECRETS.md) for required secrets
-2. **Build Failures**: Check individual workflow logs for detailed errors
-3. **Artifact Issues**: Verify file paths and naming conventions
-4. **Signing Problems**: Ensure certificates and profiles are valid
-
-### Debug Steps:
-1. Check workflow run logs
-2. Verify secret configuration
-3. Test locally with same commands
-4. Review platform-specific requirements
-
-## 📚 Resources
-
-- [Tauri Documentation](https://tauri.app/)
+- [Secrets Configuration](../SECRETS.md)
+- [Tauri Documentation](https://tauri.app/v1/guides/)
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Apple Developer Documentation](https://developer.apple.com/documentation/)
-- [Android Developer Documentation](https://developer.android.com/docs)
+
+## 🔄 Workflow Dependencies
+
+```mermaid
+graph TD
+    A[Push to main] --> B[version-check.yml]
+    B --> C{Version Conflict?}
+    C -->|Yes| D[Auto-increment & Push]
+    C -->|No| E[extract-metadata.yml]
+    D --> F[New CI/CD Run]
+    E --> G[build-windows.yml]
+    E --> H[build-macos.yml]
+    E --> I[build-linux.yml]
+    E --> J[build-android.yml]
+    E --> K[build-ios.yml]
+    G --> L[build-summary]
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+```
+
+This architecture ensures reliable, automated builds with intelligent version management and comprehensive platform support.

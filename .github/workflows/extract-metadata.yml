@@ -1,0 +1,43 @@
+name: 'Extract Metadata'
+
+on:
+  workflow_call:
+    outputs:
+      name:
+        description: 'Application name from package.json'
+        value: ${{ jobs.extract-metadata.outputs.name }}
+      version:
+        description: 'Application version from package.json'
+        value: ${{ jobs.extract-metadata.outputs.version }}
+
+jobs:
+  extract-metadata:
+    name: 'Extract Metadata'
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.meta.outputs.name }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Extract metadata
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          
+          echo "📦 App Name: ${NAME}"
+          echo "🏷️ Version: ${VERSION}"
+          
+          # Add metadata to step summary
+          echo "## 📋 Extracted Metadata" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Name | \`${NAME}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY

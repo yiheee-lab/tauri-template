@@ -1,0 +1,203 @@
+name: 'Version Check & Auto-increment'
+
+on:
+  workflow_call:
+    inputs:
+      skip-version-check:
+        description: 'Skip version check (for manual runs)'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      should-proceed:
+        description: 'Whether to proceed with CI/CD pipeline'
+        value: ${{ jobs.version-check.outputs.should-proceed }}
+      name:
+        description: 'Application name'
+        value: ${{ jobs.version-check.outputs.name }}
+      version:
+        description: 'Application version (possibly incremented)'
+        value: ${{ jobs.version-check.outputs.version }}
+
+jobs:
+  version-check:
+    name: 'Version Check & Auto-increment'
+    runs-on: ubuntu-latest
+    outputs:
+      should-proceed: ${{ steps.final-check.outputs.should-proceed }}
+      name: ${{ steps.meta.outputs.name }}
+      version: ${{ steps.final-version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          
+          echo "📦 App Name: ${NAME}"
+          echo "🏷️ Current Version: ${VERSION}"
+
+      - name: Check if version increment is needed
+        id: version-check
+        if: ${{ !inputs.skip-version-check }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_VERSION="${{ steps.meta.outputs.version }}"
+          
+          # Get latest release version
+          LATEST_RELEASE=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name // empty' 2>/dev/null || echo "")
+          
+          if [ -z "$LATEST_RELEASE" ]; then
+            echo "📋 No previous releases found, proceeding with current version"
+            echo "needs-increment=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Remove 'v' prefix if present
+          LATEST_VERSION=${LATEST_RELEASE#v}
+          
+          echo "🔍 Current version: ${CURRENT_VERSION}"
+          echo "🏷️ Latest release: ${LATEST_VERSION}"
+          
+          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+            echo "⚠️ Version ${CURRENT_VERSION} already exists as a release"
+            echo "🔄 Will auto-increment version and restart CI/CD"
+            echo "needs-increment=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Version ${CURRENT_VERSION} is new, proceeding with CI/CD"
+            echo "needs-increment=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Auto-increment version
+        id: increment-version
+        if: steps.version-check.outputs.needs-increment == 'true'
+        run: |
+          CURRENT_VERSION="${{ steps.meta.outputs.version }}"
+          
+          # Parse version components (handle semantic versioning)
+          if [[ $CURRENT_VERSION =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+          else
+            echo "❌ Invalid version format: ${CURRENT_VERSION}"
+            exit 1
+          fi
+          
+          # Increment patch version
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          
+          echo "🔄 Auto-incrementing version: ${CURRENT_VERSION} → ${NEW_VERSION}"
+          
+          # Update package.json
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${NEW_VERSION}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            console.log('✅ Updated package.json version to ${NEW_VERSION}');
+          "
+          
+          # Update Cargo.toml if exists
+          if [ -f "src-tauri/Cargo.toml" ]; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+              # macOS
+              sed -i '' "s/^version = \".*\"/version = \"${NEW_VERSION}\"/" src-tauri/Cargo.toml
+            else
+              # Linux
+              sed -i "s/^version = \".*\"/version = \"${NEW_VERSION}\"/" src-tauri/Cargo.toml
+            fi
+            echo "📦 Updated Cargo.toml version to ${NEW_VERSION}"
+          fi
+          
+          echo "new-version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version increment
+        if: steps.version-check.outputs.needs-increment == 'true'
+        run: |
+          NEW_VERSION="${{ steps.increment-version.outputs.new-version }}"
+          
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action (Version Auto-increment)"
+          
+          # Add changed files
+          git add package.json
+          if [ -f "src-tauri/Cargo.toml" ]; then
+            git add src-tauri/Cargo.toml
+          fi
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "⚠️ No changes to commit"
+            exit 0
+          fi
+          
+          # Commit and push
+          git commit -m "chore: auto-increment version to ${NEW_VERSION}
+
+          - Automatically incremented version from ${{ steps.meta.outputs.version }} to ${NEW_VERSION}
+          - Previous version ${CURRENT_VERSION} already exists as a release
+          - This commit will trigger a new CI/CD run with the updated version
+          
+          [skip ci]"
+          
+          git push origin ${{ github.ref_name }}
+          
+          echo "🚀 Successfully committed and pushed version increment"
+          echo "🔄 New CI/CD pipeline will start automatically with version ${NEW_VERSION}"
+
+      - name: Get final version
+        id: final-version
+        run: |
+          FINAL_VERSION=$(node -p "require('./package.json').version")
+          echo "version=${FINAL_VERSION}" >> $GITHUB_OUTPUT
+          echo "🏷️ Final version: ${FINAL_VERSION}"
+
+      - name: Determine if CI/CD should proceed
+        id: final-check
+        run: |
+          if [ "${{ steps.version-check.outputs.needs-increment }}" = "true" ]; then
+            echo "🛑 Stopping current pipeline - version was incremented"
+            echo "🔄 New pipeline will start automatically with updated version"
+            echo "should-proceed=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Proceeding with CI/CD pipeline"
+            echo "should-proceed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Pipeline Status Summary
+        run: |
+          echo "## 🔍 Version Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App Name | ${{ steps.meta.outputs.name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Original Version | ${{ steps.meta.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Final Version | ${{ steps.final-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Incremented | ${{ steps.version-check.outputs.needs-increment == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Should Proceed | ${{ steps.final-check.outputs.should-proceed == 'true' && '✅ Yes' || '🛑 No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.version-check.outputs.needs-increment }}" = "true" ]; then
+            echo "### 🔄 Next Steps" >> $GITHUB_STEP_SUMMARY
+            echo "- Version was automatically incremented" >> $GITHUB_STEP_SUMMARY
+            echo "- Changes have been committed and pushed" >> $GITHUB_STEP_SUMMARY
+            echo "- A new CI/CD pipeline will start automatically" >> $GITHUB_STEP_SUMMARY
+            echo "- This current pipeline will be stopped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ✅ Proceeding with Build" >> $GITHUB_STEP_SUMMARY
+            echo "- Version is unique and ready for release" >> $GITHUB_STEP_SUMMARY
+            echo "- CI/CD pipeline will continue with all platform builds" >> $GITHUB_STEP_SUMMARY
+          fi
